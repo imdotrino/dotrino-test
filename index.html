@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Test · Dotrino</title>
+  <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+  <meta name="theme-color" content="#0e1116" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Test" />
+  <!-- App interna de pruebas: no indexar. -->
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="description" content="Sandbox de pruebas del ecosistema Dotrino." />
+</head>
+<body>
+  <header>
+    <div class="brand"><img src="/icon.svg" alt="" /><b>Test</b><span>· sandbox Dotrino</span></div>
+    <div id="mode" class="mode"></div>
+  </header>
+
+  <main>
+    <section class="card">
+      <h1>Abrir un enlace FUERA de la PWA</h1>
+      <p>Objetivo: abrir <code id="target">https://dotrino.com</code> en <b>Chrome completo</b>, no en
+        un <i>Custom Tab</i> (pestaña dentro de la PWA). Instala esta app, ábrela desde el icono
+        (modo standalone) y prueba cada botón para ver cuál escapa de verdad.</p>
+    </section>
+
+    <section class="methods" id="methods">
+      <div class="card method">
+        <h2>A · window.open(_blank, noopener)</h2>
+        <p>El que pediste. <code>window.open(url, '_blank', 'noopener')</code></p>
+        <button class="btn" data-method="open-noopener">Probar A</button>
+      </div>
+
+      <div class="card method">
+        <h2>B · window.open(_blank) sin noopener</h2>
+        <p><code>window.open(url, '_blank')</code></p>
+        <button class="btn" data-method="open-blank">Probar B</button>
+      </div>
+
+      <div class="card method">
+        <h2>C · &lt;a target="_blank"&gt; por click programático</h2>
+        <p>Crea un ancla y la "clickea" desde JS (gesto de usuario).</p>
+        <button class="btn" data-method="anchor-click">Probar C</button>
+      </div>
+
+      <div class="card method">
+        <h2>D · &lt;a target="_blank"&gt; real (tócalo tú)</h2>
+        <p>Un enlace de verdad, sin JS. A veces se comporta distinto.</p>
+        <a class="btn" id="real-link" href="https://dotrino.com" target="_blank" rel="noopener">Abrir D</a>
+      </div>
+
+      <div class="card method highlight">
+        <h2>E · Intent de Android (navegador por defecto) ★</h2>
+        <p>La técnica clave en Android. <code>intent://…#Intent;scheme=https;action=VIEW;category=BROWSABLE;end</code></p>
+        <button class="btn" data-method="intent-default">Probar E</button>
+      </div>
+
+      <div class="card method highlight">
+        <h2>F · Intent forzando Chrome ★</h2>
+        <p>Intent con <code>package=com.android.chrome</code>. Abre Chrome sí o sí (si está instalado).</p>
+        <button class="btn" data-method="intent-chrome">Probar F</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="log-head"><h2>Registro</h2><button class="btn ghost" id="clear">Limpiar</button></div>
+      <pre id="log" class="log"></pre>
+    </section>
+  </main>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

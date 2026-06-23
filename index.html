@@ -16,65 +16,72 @@
   <meta name="description" content="Sandbox de pruebas del ecosistema Dotrino." />
 </head>
 <body>
+  <dotrino-support floating lang="es" href="https://ko-fi.com/dotrino" repo="imdotrino/dotrino-test" discord="https://discord.gg/D648uq7cth"></dotrino-support>
+
   <header>
-    <div class="brand"><img src="/icon.svg" alt="" /><b>Test</b><span>· sandbox Dotrino</span></div>
+    <div class="brand"><img src="/icon.svg" alt="" /><b>Test</b><span data-i18n="tagline">· sandbox Dotrino</span></div>
     <dotrino-install class="install-btn" lang="es"
       style="--cc-install-color:#e6edf3;--cc-install-bg:#161b22;--cc-install-bg-hover:#161b22;--cc-install-radius:999px;--cc-install-pad:8px 14px;--cc-install-font-size:.85rem;--cc-install-accent:#4dd0c4;--cc-install-modal-bg:#161b22;--cc-install-modal-color:#e6edf3"></dotrino-install>
+    <div class="lang-selector" role="group" aria-label="es / en">
+      <button data-lang="es">ES</button>
+      <button data-lang="en">EN</button>
+    </div>
     <div id="mode" class="mode"></div>
   </header>
 
   <main>
     <section class="card">
-      <h1>Abrir un enlace FUERA de la PWA</h1>
-      <p>Objetivo: abrir <code id="target">https://dotrino.com</code> en <b>Chrome completo</b>, no en
+      <h1 data-i18n="h1">Abrir un enlace FUERA de la PWA</h1>
+      <p data-i18n="intro">Objetivo: abrir <code id="target">https://dotrino.com</code> en <b>Chrome completo</b>, no en
         un <i>Custom Tab</i> (pestaña dentro de la PWA). Instala esta app, ábrela desde el icono
         (modo standalone) y prueba cada botón para ver cuál escapa de verdad.</p>
     </section>
 
     <section class="methods" id="methods">
       <div class="card method">
-        <h2>A · window.open(_blank, noopener)</h2>
-        <p>El que pediste. <code>window.open(url, '_blank', 'noopener')</code></p>
-        <button class="btn" data-method="open-noopener">Probar A</button>
+        <h2 data-i18n="mA_h">A · window.open(_blank, noopener)</h2>
+        <p data-i18n="mA_p">El que pediste. <code>window.open(url, '_blank', 'noopener')</code></p>
+        <button class="btn" data-method="open-noopener" data-i18n="mA_b">Probar A</button>
       </div>
 
       <div class="card method">
-        <h2>B · window.open(_blank) sin noopener</h2>
-        <p><code>window.open(url, '_blank')</code></p>
-        <button class="btn" data-method="open-blank">Probar B</button>
+        <h2 data-i18n="mB_h">B · window.open(_blank) sin noopener</h2>
+        <p data-i18n="mB_p"><code>window.open(url, '_blank')</code></p>
+        <button class="btn" data-method="open-blank" data-i18n="mB_b">Probar B</button>
       </div>
 
       <div class="card method">
-        <h2>C · &lt;a target="_blank"&gt; por click programático</h2>
-        <p>Crea un ancla y la "clickea" desde JS (gesto de usuario).</p>
-        <button class="btn" data-method="anchor-click">Probar C</button>
+        <h2 data-i18n="mC_h">C · &lt;a target="_blank"&gt; por click programático</h2>
+        <p data-i18n="mC_p">Crea un ancla y la "clickea" desde JS (gesto de usuario).</p>
+        <button class="btn" data-method="anchor-click" data-i18n="mC_b">Probar C</button>
       </div>
 
       <div class="card method">
-        <h2>D · &lt;a target="_blank"&gt; real (tócalo tú)</h2>
-        <p>Un enlace de verdad, sin JS. A veces se comporta distinto.</p>
-        <a class="btn" id="real-link" href="https://dotrino.com" target="_blank" rel="noopener">Abrir D</a>
+        <h2 data-i18n="mD_h">D · &lt;a target="_blank"&gt; real (tócalo tú)</h2>
+        <p data-i18n="mD_p">Un enlace de verdad, sin JS. A veces se comporta distinto.</p>
+        <a class="btn" id="real-link" href="https://dotrino.com" target="_blank" rel="noopener" data-i18n="mD_b">Abrir D</a>
       </div>
 
       <div class="card method highlight">
-        <h2>E · Intent de Android (navegador por defecto) ★</h2>
-        <p>La técnica clave en Android. <code>intent://…#Intent;scheme=https;action=VIEW;category=BROWSABLE;end</code></p>
-        <button class="btn" data-method="intent-default">Probar E</button>
+        <h2 data-i18n="mE_h">E · Intent de Android (navegador por defecto) ★</h2>
+        <p data-i18n="mE_p">La técnica clave en Android. <code>intent://…#Intent;scheme=https;action=VIEW;category=BROWSABLE;end</code></p>
+        <button class="btn" data-method="intent-default" data-i18n="mE_b">Probar E</button>
       </div>
 
       <div class="card method highlight">
-        <h2>F · Intent forzando Chrome ★</h2>
-        <p>Intent con <code>package=com.android.chrome</code>. Abre Chrome sí o sí (si está instalado).</p>
-        <button class="btn" data-method="intent-chrome">Probar F</button>
+        <h2 data-i18n="mF_h">F · Intent forzando Chrome ★</h2>
+        <p data-i18n="mF_p">Intent con <code>package=com.android.chrome</code>. Abre Chrome sí o sí (si está instalado).</p>
+        <button class="btn" data-method="intent-chrome" data-i18n="mF_b">Probar F</button>
       </div>
     </section>
 
     <section class="card">
-      <div class="log-head"><h2>Registro</h2><button class="btn ghost" id="clear">Limpiar</button></div>
+      <div class="log-head"><h2 data-i18n="logHead">Registro</h2><button class="btn ghost" id="clear" data-i18n="clear">Limpiar</button></div>
       <pre id="log" class="log"></pre>
     </section>
   </main>
 
   <script type="module" src="/src/main.js"></script>
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@dotrino/support@0.6/src/index.js"></script>
 </body>
 </html>

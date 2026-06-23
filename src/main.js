@@ -1,4 +1,5 @@
 import './style.css'
+import '@dotrino/install' // Web Component <dotrino-install> (botón Instalar PWA, §3)
 import { registerSW } from 'virtual:pwa-register'
 
 registerSW({ immediate: true })

@@ -19,6 +19,11 @@ header {
 .brand img { width: 28px; height: 28px; }
 .brand b { font-size: 1.1rem; }
 .brand span { color: #6b7685; font-size: .82rem; }
+/* Botón Instalar (Web Component @dotrino/install): se autooculta si la PWA no
+   es instalable. Borde acorde a la cabecera. */
+.install-btn::part(button) { border: 1px solid var(--border); font-weight: 600; }
+.install-btn::part(button):hover { border-color: var(--dim); }
+
 .mode { margin-left: auto; font-size: .82rem; color: var(--dim); display: flex; align-items: center; gap: 7px; }
 .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 .dot.on { background: #6fcf73; } .dot.off { background: #ff9f43; }

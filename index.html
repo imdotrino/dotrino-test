@@ -12,14 +12,12 @@
        weblink/acceso directo del navegador, no una app instalada. -->
   <meta name="robots" content="noindex, nofollow" />
   <meta name="description" content="Sandbox de pruebas del ecosistema Dotrino." />
-  <!-- Limpieza: desregistra cualquier service worker y borra cachés de la
-       versión PWA anterior, para quien ya la había cargado/instalado. -->
+  <!-- Mata el service worker de la versión PWA anterior registrando el SW
+       autodestructivo (/sw.js): borra cachés, se desregistra y recarga. Para
+       quien ya tenía el SW viejo, el navegador lo actualiza a este solo. -->
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then(function (rs) { rs.forEach(function (r) { r.unregister() }) }).catch(function () {})
-    }
-    if (window.caches && caches.keys) {
-      caches.keys().then(function (ks) { ks.forEach(function (k) { caches.delete(k) }) }).catch(function () {})
+      navigator.serviceWorker.register('/sw.js').catch(function () {})
     }
   </script>
 </head>

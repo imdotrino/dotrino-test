@@ -1,19 +1,15 @@
 {
   "name": "test",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
   },
-  "dependencies": {
-    "@dotrino/install": "0.1.1"
-  },
   "devDependencies": {
     "@vitejs/plugin-basic-ssl": "2.3.0",
-    "vite": "7.3.1",
-    "vite-plugin-pwa": "1.2.0"
+    "vite": "7.3.1"
   }
 }

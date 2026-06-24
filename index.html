@@ -7,21 +7,27 @@
   <link rel="icon" type="image/svg+xml" href="/icon.svg" />
   <link rel="apple-touch-icon" href="/icons/icon-192.png" />
   <meta name="theme-color" content="#0e1116" />
-  <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="Test" />
-  <!-- App interna de pruebas: no indexar. -->
+  <!-- App interna de pruebas: no indexar. NO es PWA: sin manifest, sin SW, sin
+       metas de "app standalone" → al "Añadir a pantalla de inicio" se crea un
+       weblink/acceso directo del navegador, no una app instalada. -->
   <meta name="robots" content="noindex, nofollow" />
   <meta name="description" content="Sandbox de pruebas del ecosistema Dotrino." />
+  <!-- Limpieza: desregistra cualquier service worker y borra cachés de la
+       versión PWA anterior, para quien ya la había cargado/instalado. -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function (rs) { rs.forEach(function (r) { r.unregister() }) }).catch(function () {})
+    }
+    if (window.caches && caches.keys) {
+      caches.keys().then(function (ks) { ks.forEach(function (k) { caches.delete(k) }) }).catch(function () {})
+    }
+  </script>
 </head>
 <body>
   <dotrino-support floating lang="es" href="https://ko-fi.com/dotrino" repo="imdotrino/dotrino-test" discord="https://discord.gg/D648uq7cth"></dotrino-support>
 
   <header>
     <div class="brand"><img src="/icon.svg" alt="" /><b>Test</b><span data-i18n="tagline">· sandbox Dotrino</span></div>
-    <dotrino-install class="install-btn" lang="es"
-      style="--cc-install-color:#e6edf3;--cc-install-bg:#161b22;--cc-install-bg-hover:#161b22;--cc-install-radius:999px;--cc-install-pad:8px 14px;--cc-install-font-size:.85rem;--cc-install-accent:#4dd0c4;--cc-install-modal-bg:#161b22;--cc-install-modal-color:#e6edf3"></dotrino-install>
     <div class="lang-selector" role="group" aria-label="es / en">
       <button data-lang="es">ES</button>
       <button data-lang="en">EN</button>

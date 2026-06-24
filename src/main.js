@@ -1,8 +1,8 @@
 import './style.css'
-import '@dotrino/install' // Web Component <dotrino-install> (botón Instalar PWA, §3)
-import { registerSW } from 'virtual:pwa-register'
 
-registerSW({ immediate: true })
+// NO es PWA a propósito: sin service worker ni botón de instalar (ver index.html
+// y vite.config.js). Es un sitio normal para probar el comportamiento de un
+// weblink/acceso directo del navegador.
 
 const TARGET = 'https://dotrino.com'
 
@@ -10,8 +10,8 @@ const TARGET = 'https://dotrino.com'
 const messages = {
   es: {
     tagline: '· sandbox Dotrino',
-    h1: 'Abrir un enlace FUERA de la PWA',
-    intro: `Objetivo: abrir <code id="target">${TARGET}</code> en <b>Chrome completo</b>, no en un <i>Custom Tab</i> (pestaña dentro de la PWA). Instala esta app, ábrela desde el icono (modo standalone) y prueba cada botón para ver cuál escapa de verdad.`,
+    h1: 'Abrir un enlace desde un weblink',
+    intro: `Esta página <b>no es PWA</b> (sin manifest ni service worker). Añádela a la pantalla de inicio como <b>acceso directo</b> (weblink) y ábrela desde ahí, o pruébala en el navegador. Objetivo: ver cómo abre <code id="target">${TARGET}</code> cada método.`,
     mA_h: 'A · window.open(_blank, noopener)', mA_p: `El que pediste. <code>window.open(url, '_blank', 'noopener')</code>`, mA_b: 'Probar A',
     mB_h: 'B · window.open(_blank) sin noopener', mB_p: `<code>window.open(url, '_blank')</code>`, mB_b: 'Probar B',
     mC_h: 'C · &lt;a target="_blank"&gt; por click programático', mC_p: 'Crea un ancla y la "clickea" desde JS (gesto de usuario).', mC_b: 'Probar C',
@@ -19,8 +19,8 @@ const messages = {
     mE_h: 'E · Intent de Android (navegador por defecto) ★', mE_p: 'La técnica clave en Android. <code>intent://…#Intent;scheme=https;action=VIEW;category=BROWSABLE;end</code>', mE_b: 'Probar E',
     mF_h: 'F · Intent forzando Chrome ★', mF_p: 'Intent con <code>package=com.android.chrome</code>. Abre Chrome sí o sí (si está instalado).', mF_b: 'Probar F',
     logHead: 'Registro', clear: 'Limpiar',
-    inPwa: 'Estás dentro de la PWA ✓',
-    inBrowser: 'Estás en el navegador (instala y abre desde el icono para probar de verdad).',
+    inPwa: 'Modo standalone (no debería pasar: esto ya no es PWA).',
+    inBrowser: 'Cargado como sitio/weblink en el navegador.',
     loaded: 'Cargado.', win: 'devolvió una ventana', null: 'devolvió null',
     logA: 'A: window.open(_blank, noopener) → ', logB: 'B: window.open(_blank) → ',
     logC: 'C: ancla target=_blank clickeada por JS', logD: 'D: ancla real (tap del usuario)',
@@ -28,8 +28,8 @@ const messages = {
   },
   en: {
     tagline: '· Dotrino sandbox',
-    h1: 'Open a link OUTSIDE the PWA',
-    intro: `Goal: open <code id="target">${TARGET}</code> in <b>full Chrome</b>, not an <i>in-app Custom Tab</i>. Install this app, open it from its icon (standalone mode) and try each button to see which one truly breaks out.`,
+    h1: 'Open a link from a weblink',
+    intro: `This page is <b>not a PWA</b> (no manifest, no service worker). Add it to your home screen as a <b>shortcut</b> (weblink) and open it from there, or just use the browser. Goal: see how each method opens <code id="target">${TARGET}</code>.`,
     mA_h: 'A · window.open(_blank, noopener)', mA_p: `The one you asked for. <code>window.open(url, '_blank', 'noopener')</code>`, mA_b: 'Try A',
     mB_h: 'B · window.open(_blank) without noopener', mB_p: `<code>window.open(url, '_blank')</code>`, mB_b: 'Try B',
     mC_h: 'C · &lt;a target="_blank"&gt; via programmatic click', mC_p: 'Creates an anchor and "clicks" it from JS (user gesture).', mC_b: 'Try C',
@@ -37,8 +37,8 @@ const messages = {
     mE_h: 'E · Android intent (default browser) ★', mE_p: 'The key trick on Android. <code>intent://…#Intent;scheme=https;action=VIEW;category=BROWSABLE;end</code>', mE_b: 'Try E',
     mF_h: 'F · Android intent forcing Chrome ★', mF_p: 'Intent with <code>package=com.android.chrome</code>. Opens Chrome no matter what (if installed).', mF_b: 'Try F',
     logHead: 'Log', clear: 'Clear',
-    inPwa: 'You are inside the PWA ✓',
-    inBrowser: 'You are in the browser (install and open from the icon to really test).',
+    inPwa: 'Standalone mode (unexpected: this is no longer a PWA).',
+    inBrowser: 'Loaded as a site/weblink in the browser.',
     loaded: 'Loaded.', win: 'returned a window', null: 'returned null',
     logA: 'A: window.open(_blank, noopener) → ', logB: 'B: window.open(_blank) → ',
     logC: 'C: anchor target=_blank clicked via JS', logD: 'D: real anchor (user tap)',
@@ -56,7 +56,7 @@ const t = (k) => (messages[lang] || messages.es)[k] ?? k
 function applyI18n () {
   document.documentElement.lang = lang
   document.querySelectorAll('[data-i18n]').forEach((el) => { el.innerHTML = t(el.dataset.i18n) })
-  document.querySelectorAll('dotrino-install, dotrino-support').forEach((el) => el.setAttribute('lang', lang))
+  document.querySelectorAll('dotrino-support').forEach((el) => el.setAttribute('lang', lang))
   document.querySelectorAll('.lang-selector button').forEach((b) => b.classList.toggle('on', b.dataset.lang === lang))
   refreshMode()
 }

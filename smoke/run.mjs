@@ -219,6 +219,23 @@ escenario('el contenido viaja CIFRADO: el proxy no ve lo que guardas', async () 
   assert.ok(guardado.includes(secreto), 'la bóveda sí lo guarda en claro en TU disco')
 })
 
+escenario('la CLI muestra el acta y cambia permisos (`members` / `caps`)', async () => {
+  const d = await dispositivo(vault, { label: 'con-permisos' })
+  vault.approve(d.code)
+  const res = await d.enrolled
+
+  const acta = await vault.members()
+  assert.ok(acta.members.length >= 2, 'la CLI ve a todos los miembros')
+  const mio = acta.members.find((m) => m.pub === res.device.publickey)
+  assert.ok(mio.id.match(/^[0-9A-F]{4}-[0-9A-F]{4}$/), 'con un identificador legible')
+  assert.ok(mio.caps.length, 'y sus permisos')
+
+  await vault.caps(res.device.publickey, ['read'])
+  const despues = await vault.members()
+  assert.deepEqual(despues.members.find((m) => m.pub === res.device.publickey).caps, ['read'],
+    'quitarle permisos desde la bóveda se refleja en el acta')
+})
+
 // ----- arranque -----
 
 console.log('\nSMOKE · ecosistema Dotrino (proxy + bóveda + dispositivos, todo local)\n')

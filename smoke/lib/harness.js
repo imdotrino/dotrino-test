@@ -16,6 +16,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import net from 'node:net'
+import * as atRest from '../../../dotrino-vault/src/atrest.js'
 
 export const ROOT = path.resolve(new URL('../../..', import.meta.url).pathname)
 export const PROXY_DIR = path.join(ROOT, 'dotrino-proxy')
@@ -139,6 +140,26 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {} } =
     reject (deviceId) { writeReq('reject-request.json', { deviceId }); signal('SIGUSR2') },
     /** `dotrino-vault revoke <nonce>`. */
     revoke (nonce) { writeReq('revoke-request.json', { nonce }); signal('SIGUSR2') },
+    /** `dotrino-vault members` → el acta tal y como la ve la CLI. */
+    async members (timeoutMs = 8000) {
+      const f = path.join(dir, 'acta.json')
+      try { fs.rmSync(f, { force: true }) } catch (_) {}
+      writeReq('dump-request.json', {})
+      signal('SIGUSR2')
+      const t = Date.now() + timeoutMs
+      while (Date.now() < t) {
+        const d = readJson(f)
+        if (d?.at) return d
+        await sleep(150)
+      }
+      throw new Error('la bóveda no volcó su acta')
+    },
+    /** `dotrino-vault caps <ID> …` → cambia permisos de un miembro. */
+    async caps (pub, caps) {
+      writeReq('caps-request.json', { pub, caps })
+      signal('SIGUSR2')
+      await sleep(600)
+    },
     /** `dotrino-vault devices` → volcado de delegaciones. */
     async devices (timeoutMs = 8000) {
       try { fs.rmSync(path.join(dir, 'devices.json'), { force: true }) } catch (_) {}
@@ -152,9 +173,15 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {} } =
       }
       throw new Error('la bóveda no volcó sus dispositivos')
     },
-    /** El acta que la bóveda guarda en disco (para comprobarla sin API interna). */
+    /**
+     * El acta que la bóveda guarda en su disco. El archivo va CIFRADO EN REPOSO y ligado a
+     * esta máquina, así que se descifra con el mismo módulo del vault — que es exactamente
+     * lo que puede hacer quien esté sentado en esta máquina, y nadie más.
+     */
     acta () {
-      const id = readJson(path.join(dir, 'p', path.basename(fs.readdirSync(path.join(dir, 'p'))[0]), 'identity.json'))
+      const pdir = path.join(dir, 'p', fs.readdirSync(path.join(dir, 'p'))[0])
+      const raw = fs.readFileSync(path.join(pdir, 'identity.json'), 'utf8')
+      const id = JSON.parse(atRest.isEncrypted(raw) ? atRest.decryptText(raw, atRest.machineKey(pdir)) : raw)
       const key = Object.keys(id || {}).find((k) => k.endsWith('.acta'))
       return key ? JSON.parse(id[key]) : null
     },

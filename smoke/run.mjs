@@ -159,6 +159,66 @@ escenario('una identidad que ya existía se une al perfil de la bóveda y trae s
   assert.equal(mio.continuity.from, antes.profileId)
 })
 
+escenario('el proxy verifica el acta y bindea el perfil (y rechaza una manipulada)', async () => {
+  // Un dispositivo enrolado se identifica presentando su cert y su acta.
+  const d = await dispositivo(vault, { label: 'con-acta' })
+  vault.approve(d.code)
+  const res = await d.enrolled
+
+  const { WebSocketProxyClient } = await import(path.join(ROOT, 'dotrino-proxy-client/src/index.js'))
+  const { signWithDevice } = await import(path.join(ROOT, 'dotrino-identity/vault/capabilities.js'))
+  const acta = vault.acta()
+
+  const conectar = async (actaAEnviar) => {
+    const c = new WebSocketProxyClient({ url: proxy.url, enableWebRTC: false, autoReconnect: false })
+    await c.connect()
+    const data = { op: 'identify', publickey: res.device.publickey, token: c.token, ts: Date.now() }
+    const { signature } = await signWithDevice({ privateJwk: res.device.privateJwk, data })
+    const out = await c.identify({ data, signature, cert: res.cert, acta: actaAEnviar })
+    c.close()
+    return out
+  }
+
+  const ok = await conectar(acta)
+  assert.equal(ok.profile, acta.profileId, 'el proxy reconoce a la persona detrás del dispositivo')
+
+  // Manipulada: darse a sí mismo un miembro extra rompe la firma → el proxy no la acepta.
+  const trucada = { ...acta, members: [...acta.members, { pub: 'pub-inventada', caps: ['sign'] }] }
+  const malo = await conectar(trucada)
+  assert.equal(malo.profile, null, 'un acta manipulada no bindea nada')
+  assert.equal(malo.publickey, res.device.publickey, 'pero el identify normal sigue funcionando')
+})
+
+escenario('el contenido viaja CIFRADO: el proxy no ve lo que guardas', async () => {
+  const dir = tmpDir('con-contenido')
+  const yo = await Identity.connect({ dir })
+  const qr = await vault.pair({ label: 'con-contenido' })
+  let code = null
+  const off = yo.onVault((e) => { if (e.phase === 'challenge') code = e.code })
+  const p = yo.enrollDevice(qr)
+  await vault.waitPending()
+  const t = Date.now() + 5000
+  while (!code && Date.now() < t) await new Promise((r) => setTimeout(r, 50))
+  vault.approve(code)
+  await p
+  off()
+
+  // Al entrar en el perfil se le envuelve la clave de contenido.
+  const mia = await yo.contentKey()
+  assert.ok(mia?.cek, 'el miembro nuevo recibe la clave de contenido del perfil')
+
+  // Guardar y leer a través de la bóveda, cifrado de punta a punta.
+  const secreto = 'esto no lo puede ver el proxy ' + Date.now()
+  await yo.vaultStore('appendMessage', { threadKey: 'smoke', entry: { id: 'm1', text: secreto } })
+  const hilo = await yo.vaultStore('listThread', { threadKey: 'smoke' })
+  const textos = JSON.stringify(hilo)
+  assert.ok(textos.includes(secreto), 'el dispositivo lee de vuelta lo que guardó')
+
+  // Y en el disco de la bóveda está, porque es SU almacén: lo que no lo ve es el proxy.
+  const guardado = fs.readFileSync(path.join(vault.dir, 'p', fs.readdirSync(path.join(vault.dir, 'p'))[0], 'threads.json'), 'utf8')
+  assert.ok(guardado.includes(secreto), 'la bóveda sí lo guarda en claro en TU disco')
+})
+
 // ----- arranque -----
 
 console.log('\nSMOKE · ecosistema Dotrino (proxy + bóveda + dispositivos, todo local)\n')

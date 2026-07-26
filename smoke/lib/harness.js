@@ -192,6 +192,37 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {} } =
   }
 }
 
+/**
+ * Servidor estático mínimo, para servir en local la consola y el iframe de identidad y
+ * poder probarlos con un navegador de verdad sin salir de la máquina. Sin dependencias:
+ * son cuatro tipos de archivo y una regla de respaldo para las rutas de la SPA.
+ */
+export async function servirEstatico (raiz, { spa = false } = {}) {
+  const http = await import('node:http')
+  const TIPOS = {
+    '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+    '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
+    '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml',
+    '.png': 'image/png', '.jpg': 'image/jpeg', '.webmanifest': 'application/manifest+json'
+  }
+  const port = await freePort()
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url, 'http://x')
+    let f = path.join(raiz, decodeURIComponent(url.pathname))
+    if (!f.startsWith(raiz)) { res.writeHead(403).end(); return }
+    if (fs.existsSync(f) && fs.statSync(f).isDirectory()) f = path.join(f, 'index.html')
+    if (!fs.existsSync(f) && spa) f = path.join(raiz, 'index.html')
+    if (!fs.existsSync(f)) { res.writeHead(404).end('no está'); return }
+    res.writeHead(200, { 'content-type': TIPOS[path.extname(f)] || 'application/octet-stream' })
+    fs.createReadStream(f).pipe(res)
+  })
+  await new Promise((r) => server.listen(port, '127.0.0.1', r))
+  servidores.push(server)
+  return { url: `http://127.0.0.1:${port}`, port, server }
+}
+
+const servidores = []
+
 /** Mata todo lo levantado y borra los directorios temporales. */
 export async function teardown () {
   for (const { child } of procs) { try { child.kill('SIGTERM') } catch (_) {} }
@@ -200,6 +231,7 @@ export async function teardown () {
   procs.length = 0
   for (const d of dirs) { try { fs.rmSync(d, { recursive: true, force: true }) } catch (_) {} }
   dirs.length = 0
+  for (const s of servidores.splice(0)) { try { s.close() } catch (_) {} }
 }
 
 // ----- runner mínimo (sin dependencias: esto tiene que correr en cualquier lado) -----

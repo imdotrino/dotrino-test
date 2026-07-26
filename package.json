@@ -8,10 +8,12 @@
     "build": "vite build",
     "preview": "vite preview",
     "smoke": "node smoke/run.mjs",
-    "smoke:dispositivos": "node smoke/dispositivos.mjs"
+    "smoke:dispositivos": "node smoke/dispositivos.mjs",
+    "smoke:navegador": "node smoke/navegador.mjs"
   },
   "devDependencies": {
     "@vitejs/plugin-basic-ssl": "2.3.0",
+    "playwright": "1.62.0",
     "vite": "7.3.1"
   }
 }

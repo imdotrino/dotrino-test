@@ -10,6 +10,7 @@ Hay **dos** suites:
 ```sh
 npm run smoke                  # protocolo completo, todo en un proceso (rápido)
 npm run smoke:dispositivos     # cada dispositivo en su propia máquina efímera
+npm run smoke:navegador        # el navegador de verdad (Playwright)
 node smoke/run.mjs --verbose   # con los logs del proxy y de la bóveda
 ```
 
@@ -70,9 +71,34 @@ disco propio en `/data`, red del host para llegar al proxy). Sin Docker cae a ca
 **Ya sirvió:** destapó que el binario «autosuficiente» no arranca en un Debian limpio porque
 le falta `libatomic1`. Ahora el `.deb` la declara y el README lo dice.
 
+## `smoke:navegador` — el navegador de verdad (Playwright)
+
+Lo que no se puede probar sin navegador: el **iframe de identidad en otro origen** (con su
+IndexedDB y sus llaves **no extraíbles**, que solo existen en un navegador), el `postMessage`
+entre orígenes, y la pantalla que ve la persona.
+
+Va **entero en local**: la consola y el iframe se sirven desde el disco, y el proxy y la
+bóveda se levantan aquí. No toca producción. Requiere el build de la consola:
+
+```sh
+cd ../dotrino-vault/web && npm run build
+npx playwright install chromium     # la primera vez
+```
+
+Escenarios:
+
+1. La consola abre y muestra el acta de este navegador, con el aviso de que perderlo es
+   perder el perfil **a la vista**.
+2. Se empareja con la bóveda: el código del QR llega por el `#fragment`, la consola enseña
+   los seis dígitos, se aprueban en la bóveda y el navegador entra en su acta.
+3. **Con el código equivocado**, la consola no da por conectado a nadie y sigue esperando.
+4. **La llave privada del navegador no es extraíble**: existe en IndexedDB, pero pedirle los
+   bytes con `exportKey` falla. Ni el propio código puede sacarla de esa máquina.
+
+Para desarrollar en local, la consola acepta `?vault=<url>` y apunta la identidad a un iframe
+propio — **solo si se está sirviendo desde localhost**, para que un enlace no pueda apuntar
+la identidad de nadie a un origen ajeno.
+
 ## Pendiente
 
-- **Dispositivo navegador con Playwright** contra `vault.dotrino.com` y el iframe de
-  identidad. Es el único escenario que necesita navegador de verdad; el camino de código que
-  usa el navegador (`@dotrino/identity`) ya está cubierto en las dos suites.
 - Traspaso del master y master obsoleto (restaurar un respaldo de la bóveda).

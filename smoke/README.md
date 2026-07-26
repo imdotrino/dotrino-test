@@ -5,8 +5,11 @@ emparejar un dispositivo con una bóveda, aprobar con el código correcto, **rec
 equivocado sin emitir certificado**, entrar en el acta del perfil, y que revocar corte el
 acceso de verdad.
 
+Hay **dos** suites:
+
 ```sh
-npm run smoke            # todo
+npm run smoke                  # protocolo completo, todo en un proceso (rápido)
+npm run smoke:dispositivos     # cada dispositivo en su propia máquina efímera
 node smoke/run.mjs --verbose   # con los logs del proxy y de la bóveda
 ```
 
@@ -34,10 +37,42 @@ smoke se entera en vez de seguir probando una copia vieja.
 5. Revocar corta el acceso: la bóveda deja de firmarle.
 6. Una identidad que ya existía se une al perfil y trae su **certificado de continuidad**.
 
+## `smoke:dispositivos` — cada dispositivo en su propia máquina
+
+Un dispositivo de verdad es una **máquina aparte**. Esta suite lo prueba como tal: cada uno
+arranca en su propia caja efímera (un contenedor), genera SU llave en SU disco, no ve el
+disco de ningún otro, y se empareja con la bóveda por el proxy.
+
+Y la bóveda corre aquí **como binario**, no desde el código: el mismo `dotrino-vaultd` que
+se instala un usuario, manejado con su CLI real (`--ctl pair` / `--ctl approve` /
+`--ctl members`). Requiere compilarlo antes:
+
+```sh
+cd ../dotrino-vault && bash packaging/build.sh
+```
+
+Los seis caminos de enrolamiento del ecosistema, que son código distinto:
+
+| Caja | Qué representa | De dónde sale el enrolamiento |
+|---|---|---|
+| `navegador` | navegador / PWA, y los bots | `@dotrino/identity` |
+| `cliente-node` | el cliente de referencia | `dotrino-vault/src/client.js` |
+| `terminal` | el agente de la terminal | `dotrino-terminal/agent/link.js` |
+| `ia` | el agente de IA | `@dotrino/remote-agent/link` (lo reusa) |
+| `remote-agent` | el agente remoto genérico | `@dotrino/remote-agent/link` |
+| `servicio-proxy` | un **servicio** (entra con CN) | `@dotrino/vault/service` |
+
+**Motores.** Con Docker, un contenedor por dispositivo (`/eco` montado de solo lectura,
+disco propio en `/data`, red del host para llegar al proxy). Sin Docker cae a cajas locales
+—un proceso con su `HOME` propio—, que aíslan los datos pero no el sistema. Se fuerza con
+`SMOKE_BACKEND=docker|local`.
+
+**Ya sirvió:** destapó que el binario «autosuficiente» no arranca en un Debian limpio porque
+le falta `libatomic1`. Ahora el `.deb` la declara y el README lo dice.
+
 ## Pendiente
 
 - **Dispositivo navegador con Playwright** contra `vault.dotrino.com` y el iframe de
-  identidad. Es el único escenario que necesita navegador; el resto del protocolo ya queda
-  cubierto arriba.
-- Escenarios de las fases siguientes: traspaso del master, master obsoleto (restaurar un
-  respaldo), contenido compartido.
+  identidad. Es el único escenario que necesita navegador de verdad; el camino de código que
+  usa el navegador (`@dotrino/identity`) ya está cubierto en las dos suites.
+- Traspaso del master y master obsoleto (restaurar un respaldo de la bóveda).

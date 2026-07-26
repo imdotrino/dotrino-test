@@ -275,6 +275,41 @@ escenario('CN: un servicio solo ve SU cajón de secretos, nada más', async () =
     'el cajón de otro servicio no se abre, ni con un cert válido')
 })
 
+escenario('mensajería a la PERSONA: los dos dispositivos de un contacto abren el mismo mensaje', async () => {
+  // Bob tiene dos dispositivos en su perfil; Alice es otra persona.
+  const bob = await Identity.connect({ dir: tmpDir('bob') })
+  const bob2 = await Identity.connect({ dir: tmpDir('bob2') })
+  const alice = await Identity.connect({ dir: tmpDir('alice') })
+
+  await bob.admitMember({
+    pub: bob2.me.publickey,
+    encPub: await bob2.getEncryptionPubkey(),
+    label: 'Celular de Bob',
+    caps: ['store', 'read']
+  })
+
+  // Lo que viaja entre pares es la TARJETA, no el acta: sin etiquetas ni permisos.
+  const card = await bob.profileCard()
+  assert.equal(card.keys.length, 2)
+  assert.equal(JSON.stringify(card).includes('Celular de Bob'), false, 'no le cuenta a Alice cómo llama a sus aparatos')
+
+  const r = await alice.adoptPeerCard(card)
+  assert.equal(r.adopted, true)
+  assert.equal(r.devices, 2)
+
+  const sobre = await alice.encrypt([{ publickey: bob.me.publickey }], 'hola Bob')
+  assert.equal(Object.keys(sobre.wrap).length, 2, 'una envoltura por dispositivo')
+
+  const aliceEnc = await alice.getEncryptionPubkey()
+  for (const [quien, dev] of [['el PC', bob], ['el celular', bob2]]) {
+    const { plaintext } = await dev.decrypt(aliceEnc, null, sobre)
+    assert.equal(plaintext, 'hola Bob', quien + ' de Bob lo abre')
+  }
+
+  const ajeno = await Identity.connect({ dir: tmpDir('ajeno') })
+  await assert.rejects(() => ajeno.decrypt(aliceEnc, null, sobre), /no está entre los destinatarios/)
+})
+
 // ----- arranque -----
 
 console.log('\nSMOKE · ecosistema Dotrino (proxy + bóveda + dispositivos, todo local)\n')

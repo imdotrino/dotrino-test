@@ -228,6 +228,36 @@ escenario('el topbar abre el menú de perfiles al PULSAR el avatar', async () =>
   assert.match(menu.texto, /Abrir mi perfil/, 'y ofrece abrir tu perfil (en móvil es la única vía)')
   assert.match(menu.texto, /Crear perfil/, 'y crear uno nuevo')
 
+  // Ninguna fila puede pintarse fuera del menú: el resaltado del ratón se salía por los
+  // lados (width:100% + relleno sin box-sizing) y el visto del perfil activo quedaba
+  // montado sobre el borde.
+  const filas = await page.evaluate(() => {
+    const sr = document.querySelector('dotrino-topbar').shadowRoot
+    const m = sr.querySelector('.prof-menu')
+    const caja = m.getBoundingClientRect()
+    const est = getComputedStyle(m)
+    const dentroIzq = caja.left + parseFloat(est.paddingLeft) + parseFloat(est.borderLeftWidth)
+    const dentroDer = caja.right - parseFloat(est.paddingRight) - parseFloat(est.borderRightWidth)
+    return [...m.querySelectorAll('.item')].map((n) => {
+      const r = n.getBoundingClientRect()
+      return { clase: n.className, sobraIzq: +(dentroIzq - r.left).toFixed(1), sobraDer: +(r.right - dentroDer).toFixed(1) }
+    })
+  })
+  for (const f of filas) {
+    assert.ok(f.sobraIzq <= 0.5 && f.sobraDer <= 0.5,
+      'una fila se sale del menú: ' + JSON.stringify(f))
+  }
+
+  // El visto del activo tiene su propio hueco, no va pegado al borde.
+  const visto = await page.evaluate(() => {
+    const sr = document.querySelector('dotrino-topbar').shadowRoot
+    const marca = sr.querySelector('.prof-menu .item[aria-current] .marca')
+    if (!marca) return null
+    const fila = marca.closest('.item').getBoundingClientRect()
+    return +(fila.right - marca.getBoundingClientRect().right).toFixed(1)
+  })
+  assert.ok(visto !== null && visto >= 4, 'el visto del perfil activo respira del borde: ' + visto)
+
   // Cambiar de perfil avisa al vault y RECARGA la app (así todo arranca con el nuevo).
   await page.evaluate(() => document.querySelector('dotrino-topbar').shadowRoot
     .querySelector('[data-switch="p2"]').click())

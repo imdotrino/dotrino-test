@@ -236,6 +236,45 @@ escenario('la CLI muestra el acta y cambia permisos (`members` / `caps`)', async
     'quitarle permisos desde la bóveda se refleja en el acta')
 })
 
+escenario('CN: un servicio solo ve SU cajón de secretos, nada más', async () => {
+  const { enrollService, waitForSecrets, fetchSecrets } = await import(path.join(ROOT, 'dotrino-vault/lib/src/service.js'))
+
+  // La bóveda guarda un secreto para `proxy` y otro para `geo`.
+  const setSecret = (ns, k, v) => {
+    fs.writeFileSync(path.join(vault.dir, 'secret-request.json'), JSON.stringify({ op: 'set', ns, key: k, value: v }), { mode: 0o600 })
+    process.kill(vault.pid, 'SIGUSR2')
+    return new Promise((r) => setTimeout(r, 500))
+  }
+  await setSecret('proxy', 'TURN_KEY', 'solo-del-proxy')
+  await setSecret('geo', 'DB_URL', 'solo-del-geo')
+
+  // El servicio `proxy` se enrola con `pair --service proxy`.
+  const qr = await vault.pair({ service: 'proxy' })
+  const dir = tmpDir('svc-proxy')
+  let code = null
+  const p = enrollService({ qr, ns: 'proxy', dir, onCode: (c) => { code = typeof c === 'string' ? c : c.code } })
+  await vault.waitPending()
+  const t = Date.now() + 5000
+  while (!code && Date.now() < t) await new Promise((r) => setTimeout(r, 50))
+  vault.approve(code)
+  await p
+
+  // En el acta entra como SERVICIO con su CN, no como un dispositivo del usuario.
+  const acta = await vault.members()
+  const svc = acta.members.find((m) => m.cn === 'proxy')
+  assert.ok(svc, 'el servicio queda en el acta con su nombre')
+  assert.equal(svc.isService, true)
+  assert.deepEqual(svc.caps, ['secrets'], 'y solo con permiso para su cajón')
+
+  // Lee lo suyo…
+  const secretos = await waitForSecrets({ dir, ns: 'proxy' })
+  assert.equal((secretos.secrets || secretos).TURN_KEY, 'solo-del-proxy', 'el servicio lee lo suyo')
+
+  // …y pedir el cajón de otro no cuela.
+  await assert.rejects(() => fetchSecrets({ dir, ns: 'geo' }), /no autorizado/,
+    'el cajón de otro servicio no se abre, ni con un cert válido')
+})
+
 // ----- arranque -----
 
 console.log('\nSMOKE · ecosistema Dotrino (proxy + bóveda + dispositivos, todo local)\n')

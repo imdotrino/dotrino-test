@@ -111,10 +111,13 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {} } =
 
   return {
     dir, pid: child.pid, iss: state.iss, state,
-    /** `dotrino-vault pair` → devuelve el QR. */
-    async pair ({ scope, label } = {}) {
+    /**
+     * `dotrino-vault pair` → devuelve el QR. Con `service` es `pair --service <ns>`: el cert
+     * sale limitado a `vault:secrets:<ns>` y en el acta entra como SERVICIO con ese CN.
+     */
+    async pair ({ service, label } = {}) {
       try { fs.rmSync(path.join(dir, 'pair.json'), { force: true }) } catch (_) {}
-      writeReq('pair-request.json', { ...(label ? { label } : {}), ...(scope ? { scope } : {}) })
+      writeReq('pair-request.json', { ...(label ? { label } : {}), ...(service ? { service } : {}) })
       signal('SIGUSR1')
       const t = Date.now() + 8000
       while (Date.now() < t) {

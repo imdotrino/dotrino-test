@@ -60,6 +60,30 @@ escenario('la consola abre y muestra el acta de este navegador', async () => {
   await page.close()
 })
 
+escenario('la landing explica cómo se USA, no solo cómo se descarga', async () => {
+  const page = await contexto.newPage()
+  await page.goto(webConsola.url + '/')
+
+  const uso = page.locator('[data-testid="use"]')
+  await uso.waitFor({ timeout: 15000 })
+  const texto = await uso.innerText()
+  // Lo que de verdad hace falta saber después de instalarla.
+  assert.match(texto, /[Cc]onectar un teléfono/, 'cómo conectar un aparato')
+  assert.match(texto, /pierdes un aparato/i, 'qué hacer si pierdes uno')
+
+  // Los comandos van APARTE, detrás de un desplegable: la promesa se lee sin saber de
+  // tecnología (CONVENCIONES §9.1) y quien quiera terminal la encuentra.
+  await page.locator('.use-cmds summary').click()
+  assert.match(await uso.innerText(), /dotrino-vault members/, 'los comandos, para quien los quiera')
+
+  // Y la consecuencia asumida del modelo, destacada y no escondida en una nota al pie:
+  // si pierdes la máquina sin haber conectado otra bóveda, pierdes la cuenta.
+  const aviso = await page.locator('[data-testid="use-warn"]').innerText()
+  assert.match(aviso, /pierdes la cuenta/i, 'lo dice en voz alta')
+  assert.match(aviso, /no hay|ninguna|recuperar/i, 'y que no hay rescate')
+  await page.close()
+})
+
 escenario('el navegador se empareja con la bóveda: enseña el código y entra en el acta', async () => {
   // La bóveda abre un emparejamiento; el QR lleva el código en el #fragment, que es como
   // llega de verdad (y que nunca viaja al servidor).

@@ -93,6 +93,17 @@ escenario('el navegador se empareja con la bóveda: enseña el código y entra e
   const texto = await page.locator('[data-testid="members"]').innerText()
   assert.match(texto, /manda/, 'se ve quién manda')
   await page.close()
+
+  // Y LA CUENTA QUE ESTE NAVEGADOR YA TENÍA SIGUE AHÍ. La de la bóveda entró como una
+  // cuenta MÁS, con llave nueva (camino B). Antes se sobrescribía sin preguntar, que es
+  // la fusión de cuentas que el modelo prohíbe.
+  const p = await contexto.newPage()
+  await p.goto(webIframe.url + '/')
+  const perfiles = await p.evaluate(() => {
+    try { return JSON.parse(localStorage.getItem('dotrino.identity.profiles') || '[]') } catch { return [] }
+  })
+  await p.close()
+  assert.equal(perfiles.length, 2, 'quedan las dos cuentas: la de siempre y la de la bóveda')
 })
 
 escenario('con el código equivocado, la consola no da por conectado a nadie', async () => {

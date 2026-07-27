@@ -129,16 +129,25 @@ escenario('revocar corta el acceso de verdad', async () => {
   )
 })
 
-escenario('una identidad que ya existía se une al perfil de la bóveda y trae su continuidad', async () => {
+escenario('una cuenta que ya existe NO se la lleva la bóveda: se crea una cuenta más', async () => {
+  // Camino B de `dotrino-vault/docs/vinculacion-de-cuentas.md`. Hasta 2026-07-27 esto
+  // sobrescribía la cuenta del aparato sin preguntar —la fusión de cuentas que el modelo
+  // prohíbe—; ahora la de aquí queda intacta y la de la bóveda entra como una cuenta MÁS.
   const dir = tmpDir('identidad-previa')
   const yo = await Identity.connect({ dir })
   const antes = await yo.myMembership()
-  assert.equal(antes.isMaster, true, 'antes de unirse, mandaba en su propio perfil')
+  assert.equal(antes.isMaster, true, 'antes de emparejar, mandaba en su propia cuenta')
+
+  // Sin decir de qué cuenta se habla, no se toca nada.
+  const qrMalo = await vault.pair({ label: 'sin-elegir' })
+  await assert.rejects(() => yo.enrollDevice(qrMalo), /ya está usando una cuenta/,
+    'no se lleva por delante la cuenta abierta')
+  assert.equal((await yo.myMembership()).profileId, antes.profileId, 'sigue siendo la suya')
 
   const qr = await vault.pair({ label: 'navegador' })
   let code = null
   const off = yo.onVault((e) => { if (e.phase === 'challenge') code = e.code })
-  const p = yo.enrollDevice(qr)
+  const p = yo.enrollDevice(qr, { join: 'new' })
   await vault.waitPending()
   const t = Date.now() + 5000
   while (!code && Date.now() < t) await new Promise((r) => setTimeout(r, 50))
@@ -148,15 +157,21 @@ escenario('una identidad que ya existía se une al perfil de la bóveda y trae s
   off()
 
   assert.equal(res.ok, true)
+  assert.equal(res.join.joined, true)
   const ahora = await yo.myMembership()
-  assert.notEqual(ahora.profileId, antes.profileId, 'ahora pertenece al perfil de la bóveda')
-  assert.equal(ahora.isMaster, false, 'y ya no manda: manda la bóveda')
+  assert.equal(ahora.profileId, vault.acta().profileId, 'la cuenta activa es la de la bóveda')
+  assert.equal(ahora.isMaster, false, 'y ahí no manda: manda la bóveda')
+  assert.notEqual(ahora.pubkey ?? ahora.profileId, antes.profileId, 'entró con una llave NUEVA')
 
-  const acta = vault.acta()
-  const mio = acta.members.find((m) => m.pub === antes.profileId)
-  assert.ok(mio, 'está en el acta de la bóveda')
-  assert.ok(mio.continuity, 'con el puente a lo que esa identidad hizo antes')
-  assert.equal(mio.continuity.from, antes.profileId)
+  // Y la cuenta de siempre sigue existiendo, entera, en este mismo aparato.
+  const perfiles = await yo.listProfiles()
+  assert.equal(perfiles.length, 2, 'quedan las dos cuentas')
+  const vieja = perfiles.find((x) => !x.current)
+  await yo.switchProfile(vieja.id)
+  yo.destroy()
+  const dev = await Identity.connect({ dir })
+  assert.equal((await dev.myMembership()).profileId, antes.profileId, 'intacta, con su propio acta')
+  dev.destroy()
 })
 
 escenario('el proxy verifica el acta y bindea el perfil (y rechaza una manipulada)', async () => {
@@ -195,7 +210,7 @@ escenario('el contenido viaja CIFRADO: el proxy no ve lo que guardas', async () 
   const qr = await vault.pair({ label: 'con-contenido' })
   let code = null
   const off = yo.onVault((e) => { if (e.phase === 'challenge') code = e.code })
-  const p = yo.enrollDevice(qr)
+  const p = yo.enrollDevice(qr, { join: 'new' })
   await vault.waitPending()
   const t = Date.now() + 5000
   while (!code && Date.now() < t) await new Promise((r) => setTimeout(r, 50))

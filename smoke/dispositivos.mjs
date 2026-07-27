@@ -105,7 +105,7 @@ const DISPOSITIVOS = [
       const qr = JSON.parse(process.env.QR)
       const id = await Identity.connect({ dir: '/data/identidad' })
       id.onVault((e) => { if (e.phase === 'challenge') console.log('CODE:' + e.code) })
-      const r = await id.enrollDevice(qr, { label: 'navegador' })
+      const r = await id.enrollDevice(qr, { label: 'navegador', join: 'new' })
       const m = await id.myMembership()
       console.log('OK:' + JSON.stringify({ pub: id.me.publickey, perfil: m.profileId, esMaster: m.isMaster, caps: m.caps }))
     `

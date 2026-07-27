@@ -92,6 +92,14 @@ escenario('el navegador se empareja con la bóveda: enseña el código y entra e
   // Ahora manda la bóveda, no este navegador.
   const texto = await page.locator('[data-testid="members"]').innerText()
   assert.match(texto, /manda/, 'se ve quién manda')
+
+  // Y se EXPLICA que el aparato quedó con dos cuentas, con los pasos para soltar la que
+  // no quieras. Si no se dice, aparece una entrada de más en el conmutador de perfiles y
+  // nadie sabe de dónde salió.
+  const aviso = page.locator('[data-testid="two-accounts"]')
+  await aviso.waitFor({ timeout: 10000 })
+  assert.match(await aviso.innerText(), /dos cuentas/i, 'dice que ahora hay dos')
+  assert.match(await aviso.innerText(), /[Bb]orrar/, 'y cómo deshacerse de una')
   await page.close()
 
   // Y LA CUENTA QUE ESTE NAVEGADOR YA TENÍA SIGUE AHÍ. La de la bóveda entró como una

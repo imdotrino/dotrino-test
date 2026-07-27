@@ -84,6 +84,32 @@ escenario('la landing explica cómo se USA, no solo cómo se descarga', async ()
   await page.close()
 })
 
+escenario('la descarga ofrece las TRES formas en los TRES sistemas', async () => {
+  const page = await contexto.newPage()
+  await page.goto(webConsola.url + '/')
+
+  for (const so of ['linux', 'windows', 'macos']) {
+    await page.locator(`[data-testid="os-${so}"]`).click()
+
+    // 1 · instalador: en Linux se descarga; en los otros se dice que está en camino,
+    // en vez de ofrecer un archivo que no existe.
+    const inst = await page.locator('[data-testid="m-installer"]').innerText()
+    if (so === 'linux') assert.match(inst, /\.deb|instalador/i, `${so}: hay instalador`)
+    else assert.match(inst, /en camino/i, `${so}: dice que el instalador aún no está`)
+
+    // 2 · un comando: PowerShell en Windows, terminal en los demás.
+    const cmd = await page.locator('[data-testid="m-command"]').innerText()
+    assert.match(cmd, /@dotrino\/vaultd/, `${so}: el comando`)
+    assert.match(cmd, so === 'windows' ? /irm https/ : /curl -fsSL/, `${so}: el comando de su sistema`)
+
+    // 3 · docker: igual en los tres, con la nota que corresponde.
+    const dk = await page.locator('[data-testid="m-docker"]').innerText()
+    assert.match(dk, /ghcr\.io\/imdotrino\/dotrino-vault/, `${so}: la imagen`)
+    assert.match(dk, so === 'linux' ? /no escucha nada/i : /Docker Desktop/, `${so}: la nota de su sistema`)
+  }
+  await page.close()
+})
+
 escenario('el navegador se empareja con la bóveda: enseña el código y entra en el acta', async () => {
   // La bóveda abre un emparejamiento; el QR lleva el código en el #fragment, que es como
   // llega de verdad (y que nunca viaja al servidor).

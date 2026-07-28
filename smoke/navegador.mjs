@@ -108,6 +108,9 @@ escenario('la descarga ofrece las TRES formas en los TRES sistemas', async () =>
     const cmd = await page.locator('[data-testid="m-command"]').innerText()
     assert.match(cmd, /@dotrino\/vaultd/, `${so}: el comando`)
     assert.match(cmd, so === 'windows' ? /irm https/ : /curl -fsSL/, `${so}: el comando de su sistema`)
+    // Y la bóveda CON su pantalla de control, en el mismo comando: el dueño la buscó ahí
+    // y estaba tres pantallas más abajo, en «Cómo se usa».
+    assert.match(cmd, /--tui/, `${so}: el comando único con pantalla de control`)
 
     // 3 · docker: igual en los tres, con la nota que corresponde.
     const dk = await page.locator('[data-testid="m-docker"]').innerText()

@@ -71,6 +71,13 @@ escenario('la landing explica cómo se USA, no solo cómo se descarga', async ()
   assert.match(texto, /[Cc]onectar un teléfono/, 'cómo conectar un aparato')
   assert.match(texto, /pierdes un aparato/i, 'qué hacer si pierdes uno')
 
+  // La pantalla de control y, sobre todo, cómo abrirla en Windows: es lo que el dueño
+  // fue a buscar a la página y no estaba.
+  const tui = await page.locator('[data-testid="use-tui"]').innerText()
+  assert.match(tui, /--tui/, 'el modo todo-en-una-ventana')
+  assert.match(tui, /dotrino-vault tui/, 'y abrirla sola si la bóveda ya corre')
+  assert.match(tui, /\.dotrino/, 'y el PATH de Windows, que es donde se atasca la gente')
+
   // Los comandos van APARTE, detrás de un desplegable: la promesa se lee sin saber de
   // tecnología (CONVENCIONES §9.1) y quien quiera terminal la encuentra.
   await page.locator('.use-cmds summary').click()

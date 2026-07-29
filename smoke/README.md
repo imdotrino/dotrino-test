@@ -5,11 +5,12 @@ emparejar un dispositivo con una bóveda, aprobar con el código correcto, **rec
 equivocado sin emitir certificado**, entrar en el acta del perfil, y que revocar corte el
 acceso de verdad.
 
-Hay **dos** suites:
+Las suites:
 
 ```sh
 npm run smoke                  # protocolo completo, todo en un proceso (rápido)
 npm run smoke:dispositivos     # cada dispositivo en su propia máquina efímera
+npm run smoke:configuracion    # la CONFIGURACIÓN proxio ↔ bóveda, cada uno en su caja
 npm run smoke:navegador        # el navegador de verdad (Playwright)
 node smoke/run.mjs --verbose   # con los logs del proxy y de la bóveda
 ```
@@ -70,6 +71,45 @@ disco propio en `/data`, red del host para llegar al proxy). Sin Docker cae a ca
 
 **Ya sirvió:** destapó que el binario «autosuficiente» no arranca en un Debian limpio porque
 le falta `libatomic1`. Ahora el `.deb` la declara y el README lo dice.
+
+## `smoke:configuracion` — de dónde saca su configuración un agente
+
+Un agente enrolado saca su configuración del vault, y **el vault manda**: sus valores
+pisan los del `.env` de la máquina. Eso es lo que hace barata la rotación —se cambia en
+un solo lugar y ninguna copia rancia olvidada en un VPS sigue ganando—, así que hay que
+probarlo, no suponerlo.
+
+Va en **cajas separadas** porque la bóveda va a vivir en su propio VPS y el ciclo que
+define este diseño sólo es real entre máquinas: **el vault le habla a sus servicios POR
+EL PROXIO**. De ahí la única excepción del ecosistema: el proxio no puede esperar al
+vault (esperaría a alguien que necesita el proxio escuchando), así que arranca con lo
+que tenga y aplica la configuración cuando llega. Todos los demás agentes **sí** esperan.
+
+**Y no se le cree a ningún log.** Se levantan **dos Cloudflare falsos** —uno para el
+valor del `.env`, otro para el del vault— y un cliente real pide credenciales TURN: el
+que conteste delata qué configuración está de verdad en efecto, con qué llave y con qué
+token. La precedencia queda probada de caja negra.
+
+Escenarios:
+
+1. Sin bóveda, el proxio corre con su `.env` (el modo del que se autohospeda) y no
+   menciona ningún vault.
+2. Se enrola con el comando real y la bóveda le **cede** la configuración: el log dice
+   qué claves pisó y las credenciales pasan a salir del destino del **vault**.
+3. **No espera a la bóveda**: con ella caída el transporte sirve igual, cae a lo que
+   tiene y reintenta en vez de rendirse.
+4. **Rotar no llega en caliente**: cambiar el valor en la bóveda no alcanza a un proxio
+   en marcha; hace falta reiniciarlo. Es el límite de hoy, fijado como hecho comprobado
+   y no como sorpresa.
+5. Avisa de lo que llegó tarde y **no está en efecto** hasta reiniciar.
+
+Requiere el binario de la bóveda (`cd ../dotrino-vault && bash packaging/build.sh`).
+
+**Ya sirvió:** destapó que el arnés levanta el proxio con `NODE_ENV=test`, y con eso el
+bucle del vault **no arranca** — por eso este camino no lo cubría ningún test. Y que la
+lista de "variables que sólo se leen al arrancar" del proxio, escrita a mano, ya se
+había quedado corta; ahora se enumera al revés (qué SÍ se re-aplica), que falla del lado
+seguro.
 
 ## `smoke:navegador` — el navegador de verdad (Playwright)
 

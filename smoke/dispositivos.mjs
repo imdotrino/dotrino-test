@@ -21,6 +21,7 @@ import path from 'node:path'
 import { escenario, correr, startProxy, teardown, ROOT } from './lib/harness.js'
 import { pubkeyId } from '../../dotrino-identity/vault/capabilities.js'
 import { crearCaja, destruirCajas, elegirMotor, ECO } from './lib/caja.js'
+import { parseInvite } from '../../dotrino-vault/lib/src/invite.js'
 
 const VERBOSE = process.argv.includes('--verbose')
 const log = (m) => { if (VERBOSE) console.log(m) }
@@ -75,11 +76,18 @@ async function abrirEmparejamiento ({ servicio } = {}) {
     env: { DOTRINO_VAULT_DIR: '/data/vault' },
     onLinea: (l) => { lineas.push(l.trim()); log('[pair] ' + l) }
   })
-  const linea = await esperar(
-    () => lineas.find((l) => l.startsWith('{"v":2')),
-    { que: 'el código de emparejamiento del CLI' }
-  )
-  return JSON.parse(linea)
+  // Se parsea con `parseInvite` y NO buscando una línea JSON: el CLI dejó de
+  // imprimir JSON cuando la invitación estrenó marca de formato — ahora imprime la
+  // URL del QR y el código compacto. Este test esperaba `{"v":2` y por eso se
+  // quedaba colgado hasta el timeout desde ese cambio.
+  return await esperar(() => {
+    for (const l of lineas) {
+      if (!l || l.length < 20) continue
+      const o = parseInvite(l)
+      if (o?.sn) return o
+    }
+    return null
+  }, { que: 'la invitación que imprime el CLI' })
 }
 
 const aprobar = (code) => boveda.exec(`${BINARIO} --ctl approve ${code}`, { env: { DOTRINO_VAULT_DIR: '/data/vault' } })

@@ -53,6 +53,7 @@ let puertoProxy = null
 let falsoEnv = null        // Cloudflare falso que representa el valor del .env
 let falsoVault = null      // Cloudflare falso que representa el valor del vault
 const salidaProxio = []    // todas las líneas que ha escupido el proxio
+let proxioDesde = 0        // cuándo arrancó el proxio actual (para la gracia de arranque)
 
 async function esperar (fn, { timeoutMs = 30000, que = 'la condición' } = {}) {
   const t = Date.now() + timeoutMs
@@ -120,6 +121,7 @@ async function levantarCloudflareFalso (etiqueta) {
  */
 async function levantarProxio ({ env = {} } = {}) {
   salidaProxio.length = 0
+  proxioDesde = Date.now()
   // `exec` + pidfile: matar el `docker exec` de afuera NO mata lo que corre
   // adentro. Con `exec`, la shell se convierte EN el proceso, así que `$$` es su
   // pid de verdad y se le puede mandar una señal.
@@ -236,6 +238,18 @@ async function pedirTurn () {
     const [quien, keyId, ttl] = String(res.iceServers?.[0]?.username || '').split('|')
     return { enabled: true, quien, keyId, ttl }
   } finally { c.close() }
+}
+
+/**
+ * Lo que el proxio publica sobre su relación con la bóveda: `null` = al día, o
+ * `{ motivo, desde }` si hay configuración nueva que no aplicó. Va en `GET /peers`
+ * y no en un log porque el proxio no se reinicia solo: el pendiente tiene que
+ * quedar donde se vea sin ir a leer archivos.
+ */
+async function estadoVault () {
+  const res = await fetch(`http://127.0.0.1:${puertoProxy}/peers`).catch(() => null)
+  if (!res?.ok) return null
+  return (await res.json()).vault ?? null
 }
 
 // ─────────────────────────── escenarios ───────────────────────────
@@ -373,6 +387,39 @@ escenario('rotar en la bóveda NO llega en caliente; llega al reiniciar', async 
   await esperar(() => salidaProxio.some((l) => l.includes('valor(es) del vault aplicados')),
     { que: 'la configuración tras el reinicio' })
   assert.equal((await pedirTurn()).keyId, VAULT_KEY_ROTADA, 'reiniciado, sí toma el valor rotado')
+})
+
+escenario('la bóveda AVISA del cambio y el proxio lo deja a la vista sin reiniciarse', async () => {
+  // El proxio es el único agente que NO se apaga al recibir el aviso: reiniciarlo
+  // corta las conexiones de todo el ecosistema —incluida la de la bóveda que mandó
+  // el aviso—, así que ahí un fallo no se degrada, se cae todo. Lo anota y lo
+  // publica en `GET /peers`; el momento del reinicio lo elige un humano.
+  // El resto de los agentes sí salen, y su supervisor los levanta limpios.
+  assert.equal(await estadoVault(), null, 'antes del aviso, el proxio está al día')
+
+  // PRIMERO, la defensa: un aviso que llega RECIÉN ARRANCADO se ignora a propósito.
+  // Sin esa gracia, una configuración que rompe el arranque haría un ciclo —el
+  // agente sale, el supervisor lo levanta, vuelve a salir— y esto lo comprueba en
+  // vez de esperar a que alguien lo descubra en producción.
+  setSecret('proxy', 'TURN_KEY_ID', 'rotada-dentro-de-la-gracia')
+  await esperar(() => salidaProxio.some((l) => /recién arrancado: ignorado/.test(l)),
+    { timeoutMs: 30000, que: 'que la gracia de arranque descarte el aviso' })
+  assert.equal(await estadoVault(), null, 'dentro de la gracia, el aviso no deja nada pendiente')
+
+  // Y AHORA sí, pasada la gracia (30 s desde que arrancó este proxio).
+  await esperar(() => Date.now() - proxioDesde > 31000, { timeoutMs: 40000, que: 'que pase la gracia de arranque' })
+  setSecret('proxy', 'TURN_KEY_ID', 'rotada-por-aviso')
+
+  const pendiente = await esperar(async () => await estadoVault(), { timeoutMs: 30000, que: 'el aviso de la bóveda' })
+  assert.equal(pendiente.motivo, 'cambio')
+  assert.ok(Date.parse(pendiente.desde) > 0, 'dice desde cuándo hay algo sin aplicar')
+
+  assert.ok(salidaProxio.some((l) => /configuración NUEVA en la bóveda/.test(l)),
+    'y lo dice también en el log')
+
+  // Sigue sirviendo: no se reinició ni se quedó a medias.
+  assert.equal((await pedirTurn()).keyId, VAULT_KEY_ROTADA,
+    'sigue con la configuración que tenía; el aviso no la cambia solo')
 })
 
 escenario('avisa de lo que llegó tarde y no está en efecto hasta reiniciar', async () => {

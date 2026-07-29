@@ -98,10 +98,12 @@ Escenarios:
    qué claves pisó y las credenciales pasan a salir del destino del **vault**.
 3. **No espera a la bóveda**: con ella caída el transporte sirve igual, cae a lo que
    tiene y reintenta en vez de rendirse.
-4. **Rotar no llega en caliente**: cambiar el valor en la bóveda no alcanza a un proxio
-   en marcha; hace falta reiniciarlo. Es el límite de hoy, fijado como hecho comprobado
-   y no como sorpresa.
-5. Avisa de lo que llegó tarde y **no está en efecto** hasta reiniciar.
+4. **Rotar no se aplica solo**: cambiar el valor en la bóveda no alcanza a un proxio en
+   marcha; la configuración se lee al arrancar.
+5. **Pero la bóveda AVISA**: al guardar manda un aviso firmado. El agente estándar
+   termina y su supervisor lo levanta limpio; el proxio no —reiniciarlo corta el
+   transporte de todos—, así que lo publica en `GET /peers` y el momento lo eliges tú.
+6. Avisa de lo que llegó tarde y **no está en efecto** hasta reiniciar.
 
 Requiere el binario de la bóveda (`cd ../dotrino-vault && bash packaging/build.sh`).
 

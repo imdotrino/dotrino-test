@@ -229,9 +229,21 @@ escenario('el contenido viaja CIFRADO: el proxy no ve lo que guardas', async () 
   const textos = JSON.stringify(hilo)
   assert.ok(textos.includes(secreto), 'el dispositivo lee de vuelta lo que guardó')
 
-  // Y en el disco de la bóveda está, porque es SU almacén: lo que no lo ve es el proxy.
-  const guardado = fs.readFileSync(path.join(vault.dir, 'p', fs.readdirSync(path.join(vault.dir, 'p'))[0], 'threads.json'), 'utf8')
-  assert.ok(guardado.includes(secreto), 'la bóveda sí lo guarda en claro en TU disco')
+  // Y en el disco de la bóveda tampoco se ve: el archivo va CIFRADO en reposo con una
+  // clave ligada a ESA máquina, así que llevarse el archivo no es llevarse el contenido.
+  // (Antes esto guardaba en claro y el smoke lo daba por bueno.)
+  const perfilDir = path.join(vault.dir, 'p', fs.readdirSync(path.join(vault.dir, 'p'))[0])
+  for (const f of ['threads.json', 'vault.json', 'secrets.json', 'identity.json']) {
+    const ruta = path.join(perfilDir, f)
+    if (!fs.existsSync(ruta)) continue
+    const guardado = fs.readFileSync(ruta, 'utf8')
+    assert.ok(guardado.startsWith('DOTRINO-ATREST-v1.'), f + ' tiene que estar cifrado en reposo')
+    assert.ok(!guardado.includes(secreto), f + ' no puede dejar el contenido a la vista')
+  }
+
+  // Pero la bóveda sí lo lee: releerlo por el mismo camino devuelve lo guardado.
+  const relectura = await yo.vaultStore('listThread', { threadKey: 'smoke' })
+  assert.ok(JSON.stringify(relectura).includes(secreto), 'cifrado sí, ilegible para su dueño no')
 })
 
 escenario('la CLI muestra el acta y cambia permisos (`members` / `caps`)', async () => {

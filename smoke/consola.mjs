@@ -341,6 +341,64 @@ escenario('F4 — datos sensibles: el aparato guarda un sobre cerrado y lo recup
   assert.ok(!raw.includes('VALOR-SELLADO'), 'el valor no queda en claro en el disco de la bóveda')
 })
 
+escenario('el perfil que editas en el aparato se ve en la bóveda (`dotrino-vault me`)', async () => {
+  // Cambiar el apodo o la foto en un dispositivo tiene que llegar a la bóveda —es la copia
+  // autoritativa— y el dueño tiene que poder COMPROBARLO desde su máquina. La foto va como
+  // data-URI, igual que la manda la identidad de verdad.
+  const foto = 'data:image/png;base64,' + Buffer.alloc(9000, 7).toString('base64')
+  const r = await correrGuion('nuevo', GUION_SECRETO, {
+    env: {
+      ARGS: JSON.stringify({
+        method: 'profileSet',
+        args: { me: { nickname: 'Seyacat', nombres: 'Santiago', email: 'sandrade@dotrino.com', telefono: '0999', telefonoVisible: false, avatar: foto } }
+      })
+    },
+    que: 'guardar el perfil desde el aparato'
+  })
+  assert.ok(r.ok, 'el aparato no pudo guardar su perfil: ' + r.error)
+
+  const salida = ctl('me').stdout || ''
+  assert.match(salida, /Seyacat/, 'la bóveda muestra el apodo nuevo:\n' + salida)
+  assert.match(salida, /image\/png/, 'y que hay foto, con su tipo:\n' + salida)
+  assert.match(salida, /8\.8 KB/, 'y su tamaño:\n' + salida)
+  assert.match(salida, /sandrade@dotrino\.com/, 'y los datos:\n' + salida)
+  assert.match(salida, /0999.*oculto/, 'respetando lo que el usuario marcó como oculto:\n' + salida)
+  assert.ok(!salida.includes('base64'), 'pero NO vomita el data-URI de la foto en la terminal')
+
+  // Y escribir en la bóveda queda ANOTADO: antes la bitácora contaba quién entró, pero no
+  // qué hizo después.
+  const b = bitacora()
+  assert.match(b, /profileSet|guardó|store/i, 'la escritura queda en la bitácora:\n' + b)
+})
+
+escenario('renombrar un dispositivo: el nombre con el que lo reconoces', async () => {
+  // El aparato entra con el nombre que le da la identidad al emparejarse —y si no le
+  // pusiste uno, con TU apodo de ese momento—, así que se queda desfasado en cuanto te
+  // renombras. Antes cambiarlo exigía revocarlo y volver a emparejarlo.
+  const id = await idDe(nuevo.pub)
+  assert.ok(miembros().includes('nuevo'), 'entró con la etiqueta del emparejamiento')
+
+  const r = ctl(`label ${id} "Teléfono de casa"`)
+  assert.equal(r.status, 0, 'el CLI aceptó el cambio: ' + (r.stderr || r.stdout))
+  await sleep(1200)
+
+  const acta = miembros()
+  assert.ok(acta.includes('Teléfono de casa'), 'el acta lo llama por su nombre nuevo:\n' + acta)
+  assert.ok(acta.includes(id), 'y sigue siendo el mismo aparato')
+
+  // La lista de DISPOSITIVOS lee las delegaciones, no el acta: si solo se tocara una de
+  // las dos, el nombre viejo seguiría a la vista donde más se mira.
+  const devs = ctl('devices').stdout || ''
+  assert.ok(devs.includes('Teléfono de casa'), 'y las delegaciones también:\n' + devs)
+  assert.ok(!devs.includes('· nuevo'), 'el nombre viejo ya no está')
+
+  // Renombrar NO toca permisos: sigue pudiendo guardar lo suyo.
+  const sigue = await correrGuion('nuevo', GUION_SECRETO, {
+    env: { ARGS: JSON.stringify({ method: 'secure.list' }) }, que: 'sus datos sensibles'
+  })
+  assert.ok(sigue.ok, 'renombrar no le quitó permisos: ' + sigue.error)
+})
+
 escenario('quitar «administra» corta la administración EN EL ACTO', async () => {
   ctl(`caps ${await idDe(admin.pub)} -administra`)
   await sleep(1200)

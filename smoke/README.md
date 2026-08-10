@@ -11,6 +11,7 @@ Las suites:
 npm run smoke                  # protocolo completo, todo en un proceso (rápido)
 npm run smoke:dispositivos     # cada dispositivo en su propia máquina efímera
 npm run smoke:configuracion    # la CONFIGURACIÓN proxio ↔ bóveda, cada uno en su caja
+npm run smoke:consola          # la CONSOLA REMOTA: admitir a distancia, sin tocar el PC
 npm run smoke:navegador        # el navegador de verdad (Playwright)
 node smoke/run.mjs --verbose   # con los logs del proxy y de la bóveda
 ```
@@ -112,6 +113,36 @@ bucle del vault **no arranca** — por eso este camino no lo cubría ningún tes
 lista de "variables que sólo se leen al arrancar" del proxio, escrita a mano, ya se
 había quedado corta; ahora se enumera al revés (qué SÍ se re-aplica), que falla del lado
 seguro.
+
+## `smoke:consola` — administrar el perfil desde otro aparato
+
+La consola remota (`dotrino-vault/docs/consola-remota.md`): un dispositivo con la
+capacidad **«administra»** admite y expulsa miembros **sin que el dueño vaya al PC**. Eso
+solo se puede probar con las máquinas separadas de verdad, porque lo que falla es
+justamente lo que pasa **entre** ellas.
+
+Tres cajas: la **bóveda** (el binario, manejado con su CLI real), el **admin** y el
+aparato **nuevo**. Escenarios:
+
+1. El admin entra como un aparato normal — y el QR **nunca** otorga administración.
+2. Sin «administra», la consola remota le dice que no.
+3. El dueño concede `+administra` en el PC, y el permiso **llega al cert al renovar**.
+4. **El paso clave:** el admin abre un emparejamiento, el aparato nuevo muestra su código y
+   el admin lo aprueba **desde su máquina**. La bitácora anota **quién** aprobó.
+5. Un admin **no** puede crear otro admin ni emparejar servicios (se corta en la bóveda).
+6. El aviso firmado llega a los demás aparatos: administrar a distancia no es invisible.
+7. **F4** — datos sensibles guardados y recuperados por el camino real, y sin quedar en
+   claro en el disco de la bóveda.
+8. Quitar `-administra` corta la administración **en el acto**, sin esperar a la caducidad.
+
+Requiere el binario (`cd ../dotrino-vault && bash packaging/build.sh`).
+
+**Ya sirvió, y de sobra:** con F1–F5 «implementadas» y 141 pruebas verdes, la consola
+remota **no funcionaba**. Destapó tres fallos que se tapaban entre sí — el vault colgado de
+un `@dotrino/identity` anterior a la capacidad `admin` (el acta la descartaba en silencio),
+el scope del cert copiado del cert viejo al renovar (un permiso concedido no llegaba nunca,
+y uno retirado seguía valiendo hasta 30 días) y las operaciones de admin sin cruzar con el
+acta. Detalle en `dotrino-vault/docs/consola-remota.md §11`.
 
 ## `smoke:navegador` — el navegador de verdad (Playwright)
 

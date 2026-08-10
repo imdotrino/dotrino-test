@@ -11,7 +11,8 @@
     "smoke:dispositivos": "node smoke/dispositivos.mjs",
     "smoke:navegador": "node smoke/navegador.mjs",
     "smoke:interfaz": "node smoke/interfaz.mjs",
-    "smoke:configuracion": "node smoke/configuracion.mjs"
+    "smoke:configuracion": "node smoke/configuracion.mjs",
+    "smoke:consola": "node smoke/consola.mjs"
   },
   "devDependencies": {
     "@vitejs/plugin-basic-ssl": "2.3.0",

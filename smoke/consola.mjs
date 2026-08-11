@@ -142,6 +142,35 @@ const GUION_ADMIN = `
   process.exit(0)
 `
 
+/**
+ * Pide la lista de dispositivos CON `sinceSeq`, que es lo que manda siempre un aparato ya
+ * emparejado. Devuelve el acta que contesta la bóveda: si no llega, el aparato se queda
+ * congelado con la copia del día que entró y no se entera de nada más.
+ */
+const GUION_DISPOSITIVOS = `
+  import fs from 'node:fs'
+  import { WebSocketProxyClient } from '/eco/dotrino-vault/node_modules/@dotrino/proxy-client/src/index.js'
+  import { installNodeGlobals } from '/eco/dotrino-vault/src/node-globals.js'
+  import { signWithDevice } from '/eco/dotrino-identity/vault/capabilities.js'
+  import { MSG } from '/eco/dotrino-vault/lib/src/protocol.js'
+  installNodeGlobals('/data/dev2')
+  const { device, cert, iss } = JSON.parse(fs.readFileSync('/data/dev.json', 'utf8'))
+  const c = new WebSocketProxyClient({ url: process.env.PROXY, enableWebRTC: false, autoReconnect: false })
+  await c.connect()
+  const data = { op: 'devices', sinceSeq: Number(process.env.SINCE || 0), publickey: device.publickey, ts: Date.now() }
+  const { signature } = await signWithDevice({ privateJwk: device.privateJwk, data })
+  const salida = new Promise((res) => {
+    c.on('message', (_f, p) => {
+      if (p?.type === MSG.DEVICES_RESULT) res({ ok: true, seq: p.acta?.seq ?? null, miembros: (p.acta?.members || []).length })
+      else if (p?.type === MSG.ERROR) res({ ok: false, error: p.error })
+    })
+  })
+  c.sendByPubkey(iss, { type: MSG.DEVICES, data, signature, cert })
+  const r = await salida
+  console.log((r.ok ? 'RES:' : 'ERR:') + (r.ok ? JSON.stringify(r) : r.error))
+  process.exit(0)
+`
+
 /** Renovar: el cert nuevo sale con el scope que dice el ACTA, no con el que tenía. */
 const GUION_RENOVAR = `
   import fs from 'node:fs'
@@ -369,6 +398,22 @@ escenario('el perfil que editas en el aparato se ve en la bóveda (`dotrino-vaul
   // qué hizo después.
   const b = bitacora()
   assert.match(b, /profileSet|guardó|store/i, 'la escritura queda en la bitácora:\n' + b)
+})
+
+escenario('un aparato ya emparejado SIGUE recibiendo el acta (sinceSeq)', async () => {
+  // Un navegador que ya entró manda SIEMPRE `sinceSeq` para que le llegue la cadena que se
+  // perdió. Esa rama llamaba a `identity.actaHistory`, que no existía en el envoltorio de
+  // Node: TypeError síncrono, la bóveda contestaba error, y el aparato se quedaba con la
+  // copia del acta del día que emparejó — sin permisos nuevos, sin nombres nuevos y sin
+  // forma de enterarse. El escenario con sinceSeq=0 no lo pillaba.
+  for (const since of [0, 1]) {
+    const r = await correrGuion('nuevo', GUION_DISPOSITIVOS, {
+      env: { SINCE: String(since) }, que: `la lista de dispositivos con sinceSeq=${since}`
+    })
+    assert.ok(r.ok, `con sinceSeq=${since} la bóveda debería contestar: ` + r.error)
+    assert.ok(r.valor.seq >= 1, 'y mandar el acta: ' + JSON.stringify(r.valor))
+    assert.ok(r.valor.miembros >= 2, 'con sus miembros: ' + JSON.stringify(r.valor))
+  }
 })
 
 escenario('renombrar un dispositivo: el nombre con el que lo reconoces', async () => {

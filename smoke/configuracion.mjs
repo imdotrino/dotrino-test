@@ -242,7 +242,7 @@ async function pedirTurn () {
 
 /**
  * Lo que el proxio publica sobre su relación con la bóveda: `null` = al día, o
- * `{ motivo, desde }` si hay configuración nueva que no aplicó. Va en `GET /peers`
+ * `{ reason, since }` si hay configuración nueva que no aplicó. Va en `GET /peers`
  * y no en un log porque el proxio no se reinicia solo: el pendiente tiene que
  * quedar donde se vea sin ir a leer archivos.
  */
@@ -402,7 +402,7 @@ escenario('la bóveda AVISA del cambio y el proxio lo deja a la vista sin reinic
   // agente sale, el supervisor lo levanta, vuelve a salir— y esto lo comprueba en
   // vez de esperar a que alguien lo descubra en producción.
   setSecret('proxy', 'TURN_KEY_ID', 'rotada-dentro-de-la-gracia')
-  await esperar(() => salidaProxio.some((l) => /recién arrancado: ignorado/.test(l)),
+  await esperar(() => salidaProxio.some((l) => /right after start: ignored/.test(l)),
     { timeoutMs: 30000, que: 'que la gracia de arranque descarte el aviso' })
   assert.equal(await estadoVault(), null, 'dentro de la gracia, el aviso no deja nada pendiente')
 
@@ -411,8 +411,8 @@ escenario('la bóveda AVISA del cambio y el proxio lo deja a la vista sin reinic
   setSecret('proxy', 'TURN_KEY_ID', 'rotada-por-aviso')
 
   const pendiente = await esperar(async () => await estadoVault(), { timeoutMs: 30000, que: 'el aviso de la bóveda' })
-  assert.equal(pendiente.motivo, 'cambio')
-  assert.ok(Date.parse(pendiente.desde) > 0, 'dice desde cuándo hay algo sin aplicar')
+  assert.equal(pendiente.reason, 'changed')
+  assert.ok(Date.parse(pendiente.since) > 0, 'dice desde cuándo hay algo sin aplicar')
 
   assert.ok(salidaProxio.some((l) => /configuración NUEVA en la bóveda/.test(l)),
     'y lo dice también en el log')

@@ -184,6 +184,9 @@ const GUION_RENOVAR = `
   const d = JSON.parse(fs.readFileSync('/data/dev.json', 'utf8'))
   try {
     const { cert } = await requestRenew({ masterPubkey: d.iss, proxyUrl: process.env.PROXY, device: d.device, cert: d.cert, dir: '/data/ren' })
+    // El papel VIEJO se guarda aparte: renovar lo retira, y hay que poder comprobar qué
+    // hace la bóveda cuando alguien vuelve a aparecer con él.
+    fs.writeFileSync('/data/dev-viejo.json', JSON.stringify(d))
     fs.writeFileSync('/data/dev.json', JSON.stringify({ ...d, cert }))
     console.log('RES:' + JSON.stringify({ scope: cert.scope }))
   } catch (e) { console.log('ERR:' + e.message) }
@@ -232,7 +235,7 @@ const GUION_REVOCADO = `
   import { verifyRevoke } from '/eco/dotrino-vault/src/client.js'
   import { MSG } from '/eco/dotrino-vault/lib/src/protocol.js'
   installNodeGlobals('/data/rev')
-  const { device, cert, iss } = JSON.parse(fs.readFileSync('/data/dev.json', 'utf8'))
+  const { device, cert, iss } = JSON.parse(fs.readFileSync(process.env.DEV || '/data/dev.json', 'utf8'))
   const c = new WebSocketProxyClient({ url: process.env.PROXY, enableWebRTC: false, autoReconnect: false })
   await c.connect()
   // Identificarse es lo que le hace direccionable para el aviso.
@@ -356,6 +359,20 @@ escenario('el dueño concede «administra» EN EL PC y el permiso llega renovand
   const r = await correrGuion('admin', GUION_RENOVAR, { que: 'la renovación' })
   assert.ok(r.ok, 'no pudo renovar: ' + r.error)
   assert.ok(r.valor.scope.includes('vault:admin'), 'el cert nuevo estrena vault:admin: ' + r.valor.scope)
+})
+
+escenario('el papel viejo NO es una expulsión: cambiar permisos no borra el aparato', async () => {
+  // El fallo, contado por el dueño: «le di permisos de admin al dispositivo y ahora
+  // desapareció como que hubiera sido revocado». Cambiar permisos obliga a renovar, y
+  // renovar retira el certificado anterior. Si al reaparecer con el papel viejo la bóveda
+  // le manda el aviso FIRMADO de expulsión, el aparato se borra solo: pierde su enlace
+  // con la bóveda y vuelve a ser una cuenta suelta, sin que nadie lo haya echado.
+  // Un papel retirado se responde con «renueva», no con «estás fuera».
+  const r = await correrGuion('admin', GUION_REVOCADO, { env: { DEV: '/data/dev-viejo.json' }, que: 'la respuesta al cert viejo' })
+  assert.equal(r.ok, false, 'con el cert viejo NO puede llegar un aviso de expulsión: el aparato se borraría solo')
+  assert.match(r.error, /revoked/, 'lo que sí llega es un rechazo sin firma, que no borra nada: ' + r.error)
+  // Y sigue siendo del perfil, que es lo que hace que el aviso no proceda.
+  assert.match(miembros(), new RegExp(await idDe(admin.pub)), 'el aparato sigue en el acta:\n' + miembros())
 })
 
 escenario('ahora sí administra: ve la bitácora y lo pendiente', async () => {
@@ -579,8 +596,8 @@ escenario('a un aparato revocado la bóveda le REEMITE el aviso firmado', async 
   // en cada sitio: la pantalla del PC le retiraba los papeles pero lo dejaba de miembro,
   // así que la consola web seguía pintando «un dispositivo que en la bóveda ya no
   // existe». La lista de miembros es la que ve la web.
-  const lista = miembros()
-  assert.ok(!lista.includes(id), 'el aparato quitado sigue en el acta:\n' + lista)
+  const list = miembros()
+  assert.ok(!list.includes(id), 'el aparato quitado sigue en el acta:\n' + list)
 })
 
 // ---------- arranque ----------

@@ -12,6 +12,10 @@
  * Correr:  node smoke/run.mjs        (o `npm run smoke`)
  */
 import assert from 'node:assert/strict'
+// Las aserciones sobre MENSAJES aceptan inglés y español: los mensajes de error del
+// ecosistema se migraron a inglés (CONVENCIONES §8.1) y estas pruebas se quedaron
+// comprobando la frase vieja — cuatro escenarios en rojo sin que nada estuviera roto.
+// Se acepta la forma antigua mientras queden piezas sin migrar.
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
@@ -124,7 +128,7 @@ escenario('revocar corta el acceso de verdad', async () => {
       masterPubkey: vault.iss, proxyUrl: proxy.url, device: res.device, cert: res.cert,
       payload: { hola: 'otra vez' }, dir: tmpDir('sign-ko')
     }),
-    /no autorizado/,
+    /unauthorized|no autorizado/,
     'revocado = la bóveda deja de firmarle'
   )
 })
@@ -140,7 +144,7 @@ escenario('una cuenta que ya existe NO se la lleva la bóveda: se crea una cuent
 
   // Sin decir de qué cuenta se habla, no se toca nada.
   const qrMalo = await vault.pair({ label: 'sin-elegir' })
-  await assert.rejects(() => yo.enrollDevice(qrMalo), /ya está usando una cuenta/,
+  await assert.rejects(() => yo.enrollDevice(qrMalo), /already using an account|ya está usando una cuenta/,
     'no se lleva por delante la cuenta abierta')
   assert.equal((await yo.myMembership()).profileId, antes.profileId, 'sigue siendo la suya')
 
@@ -298,7 +302,7 @@ escenario('CN: un servicio solo ve SU cajón de secretos, nada más', async () =
   assert.equal((secretos.secrets || secretos).TURN_KEY, 'solo-del-proxy', 'el servicio lee lo suyo')
 
   // …y pedir el cajón de otro no cuela.
-  await assert.rejects(() => fetchSecrets({ dir, ns: 'geo' }), /no autorizado/,
+  await assert.rejects(() => fetchSecrets({ dir, ns: 'geo' }), /unauthorized|no autorizado/,
     'el cajón de otro servicio no se abre, ni con un cert válido')
 })
 
@@ -334,7 +338,7 @@ escenario('mensajería a la PERSONA: los dos dispositivos de un contacto abren e
   }
 
   const ajeno = await Identity.connect({ dir: tmpDir('ajeno') })
-  await assert.rejects(() => ajeno.decrypt(aliceEnc, null, sobre), /no está entre los destinatarios/)
+  await assert.rejects(() => ajeno.decrypt(aliceEnc, null, sobre), /not among the message recipients|no está entre los destinatarios/)
 })
 
 // ----- arranque -----

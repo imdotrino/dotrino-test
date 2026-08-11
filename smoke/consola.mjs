@@ -218,6 +218,45 @@ const GUION_RENUNCIA = `
   process.exit(0)
 `
 
+/**
+ * Un aparato REVOCADO que vuelve a aparecer: pide la lista y comprueba si la bóveda le
+ * reemite el aviso FIRMADO de que está fuera. Si no llega, el aparato no puede borrar nada
+ * (un error suelto no va firmado y tiene prohibido borrar), así que se queda enseñando un
+ * perfil del que ya lo echaron.
+ */
+const GUION_REVOCADO = `
+  import fs from 'node:fs'
+  import { WebSocketProxyClient } from '/eco/dotrino-vault/node_modules/@dotrino/proxy-client/src/index.js'
+  import { installNodeGlobals } from '/eco/dotrino-vault/src/node-globals.js'
+  import { signWithDevice } from '/eco/dotrino-identity/vault/capabilities.js'
+  import { verifyRevoke } from '/eco/dotrino-vault/src/client.js'
+  import { MSG } from '/eco/dotrino-vault/lib/src/protocol.js'
+  installNodeGlobals('/data/rev')
+  const { device, cert, iss } = JSON.parse(fs.readFileSync('/data/dev.json', 'utf8'))
+  const c = new WebSocketProxyClient({ url: process.env.PROXY, enableWebRTC: false, autoReconnect: false })
+  await c.connect()
+  // Identificarse es lo que le hace direccionable para el aviso.
+  const idData = { op: 'identify', publickey: device.publickey, token: c.token, ts: Date.now() }
+  const { signature: idSig } = await signWithDevice({ privateJwk: device.privateJwk, data: idData })
+  try { await c.identify({ data: idData, signature: idSig, cert }) } catch (_) {}
+  const data = { op: 'devices', sinceSeq: 0, publickey: device.publickey, ts: Date.now() }
+  const { signature } = await signWithDevice({ privateJwk: device.privateJwk, data })
+  const salida = new Promise((res) => {
+    let err = null
+    c.on('message', async (_f, p) => {
+      if (p?.type === MSG.REVOKED) {
+        // FIRMADO por la maestra: es lo único con lo que un aparato puede auto-borrarse.
+        const ok = await verifyRevoke({ body: p.body, signature: p.signature, master: iss, devicePubkey: device.publickey })
+        res({ ok: true, firmado: ok })
+      } else if (p?.type === MSG.ERROR) { err = p.error; setTimeout(() => res({ ok: false, error: err }), 2500) }
+    })
+  })
+  c.sendByPubkey(iss, { type: MSG.DEVICES, data, signature, cert })
+  const r = await salida
+  console.log((r.ok ? 'RES:' : 'ERR:') + (r.ok ? JSON.stringify(r) : r.error))
+  process.exit(0)
+`
+
 /** F4 — datos sensibles: guardar y recuperar un sobre cerrado por el camino real. */
 const GUION_SECRETO = `
   import fs from 'node:fs'
@@ -521,6 +560,20 @@ escenario('y renovar ya no le devuelve el permiso: el cert sigue al acta', async
   const r = await correrGuion('admin', GUION_RENOVAR, { que: 'la renovación' })
   assert.ok(r.ok, 'debería poder renovar (sigue siendo miembro): ' + r.error)
   assert.ok(!r.valor.scope.includes('vault:admin'), 'pero sin administración: ' + r.valor.scope)
+})
+
+escenario('a un aparato revocado la bóveda le REEMITE el aviso firmado', async () => {
+  // Quitar un aparato mientras está apagado era invisible para él: el aviso firmado se
+  // manda una vez y, si no estaba escuchando, no volvía a mandarse nunca. Con un error
+  // suelto no puede borrar nada —no va firmado, y borrar con eso sería destruir datos
+  // ajenos con un mensaje— así que seguía enseñando el perfil como si nada.
+  const id = await idDe(nuevo.pub)
+  ctl(`revoke ${id}`)   // por IDENTIFICADOR: todos sus certificados
+  await sleep(1200)
+
+  const r = await correrGuion('nuevo', GUION_REVOCADO, { que: 'el aviso de revocación' })
+  assert.ok(r.ok, 'la bóveda debería reemitir el aviso, no solo decir «no autorizado»: ' + r.error)
+  assert.ok(r.valor.firmado, 'y FIRMADO por la maestra: sin firma el aparato no puede borrar nada')
 })
 
 // ---------- arranque ----------

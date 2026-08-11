@@ -37,7 +37,11 @@ async function abrirConsola (hash = '') {
   page.on('console', (m) => log('[navegador] ' + m.text()))
   page.on('pageerror', (e) => log('[navegador!] ' + e.message))
   await page.goto(`${webConsola.url}/dispositivos?vault=${encodeURIComponent(webIframe.url + '/')}${hash}`)
-  await page.waitForSelector('[data-testid="members"] .member', { timeout: 30000 })
+  // Entrando CON invitación la pantalla es SOLO el emparejamiento (por diseño: llegar por
+  // un QR y encontrarte la consola entera es no entender ni que estás en medio de algo ni
+  // qué botón te toca), así que la lista de miembros no existe todavía. Esperarla siempre
+  // dejaba estos dos escenarios en rojo sin que nada estuviera roto.
+  await page.waitForSelector(hash ? '[data-testid="pair-flow"]' : '[data-testid="members"] .member', { timeout: 30000 })
   return page
 }
 
@@ -142,6 +146,20 @@ escenario('el navegador se empareja con la bóveda: enseña el código y entra e
     () => !document.querySelector('[data-testid="pair-code"]'),
     null, { timeout: 30000 }
   )
+  // Al terminar queda la pantalla de «listo», que es TAMBIÉN donde se explica que el
+  // aparato acabó con dos cuentas. Así que primero se lee, y luego se cierra: si no se
+  // dice, aparece una entrada de más en el conmutador de perfiles y nadie sabe de dónde
+  // salió.
+  const aviso = page.locator('[data-testid="two-accounts"]')
+  await aviso.waitFor({ timeout: 30000 })
+  assert.match(await aviso.innerText(), /dos cuentas|two accounts/i, 'dice que ahora hay dos')
+  // Los pasos para soltar una viven en un <details> plegado, así que hay que abrirlo —
+  // `innerText` no ve lo que no se pinta. Abrirlo es lo que haría la persona.
+  await aviso.locator('summary').click()
+  assert.match(await aviso.innerText(), /[Bb]orrar|[Dd]elete|[Rr]emove/, 'y cómo deshacerse de una')
+
+  // Cerrarla es parte del camino real: hasta entonces la consola no se ve.
+  await page.click('[data-testid="flow-close"]', { timeout: 30000 })
   await page.waitForSelector('[data-testid="members"] .member:nth-child(2)', { timeout: 30000 })
 
   const acta = vault.acta()
@@ -149,17 +167,11 @@ escenario('el navegador se empareja con la bóveda: enseña el código y entra e
   const enPantalla = await page.locator('[data-testid="members"] .member').count()
   assert.equal(enPantalla, 2, 'y la consola ya muestra los dos')
 
-  // Ahora manda la bóveda, no este navegador.
+  // Ahora el Master es la bóveda, no este navegador. (Se llamaba «manda» hasta que el
+  // dueño fijó el término: es el Master del acta, y así se llama en el modelo, en los
+  // docs y en el código — la pantalla decía una cosa y todo lo demás otra.)
   const texto = await page.locator('[data-testid="members"]').innerText()
-  assert.match(texto, /manda/, 'se ve quién manda')
-
-  // Y se EXPLICA que el aparato quedó con dos cuentas, con los pasos para soltar la que
-  // no quieras. Si no se dice, aparece una entrada de más en el conmutador de perfiles y
-  // nadie sabe de dónde salió.
-  const aviso = page.locator('[data-testid="two-accounts"]')
-  await aviso.waitFor({ timeout: 10000 })
-  assert.match(await aviso.innerText(), /dos cuentas/i, 'dice que ahora hay dos')
-  assert.match(await aviso.innerText(), /[Bb]orrar/, 'y cómo deshacerse de una')
+  assert.match(texto, /Master/i, 'se ve quién es el Master')
   await page.close()
 
   // Y LA CUENTA QUE ESTE NAVEGADOR YA TENÍA SIGUE AHÍ. La de la bóveda entró como una

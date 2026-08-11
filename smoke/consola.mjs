@@ -574,6 +574,13 @@ escenario('a un aparato revocado la bóveda le REEMITE el aviso firmado', async 
   const r = await correrGuion('nuevo', GUION_REVOCADO, { que: 'el aviso de revocación' })
   assert.ok(r.ok, 'la bóveda debería reemitir el aviso, no solo decir «no autorizado»: ' + r.error)
   assert.ok(r.valor.firmado, 'y FIRMADO por la maestra: sin firma el aparato no puede borrar nada')
+
+  // Y se va del ACTA, no solo de la lista de certificados. Quitar era media operación
+  // en cada sitio: la pantalla del PC le retiraba los papeles pero lo dejaba de miembro,
+  // así que la consola web seguía pintando «un dispositivo que en la bóveda ya no
+  // existe». La lista de miembros es la que ve la web.
+  const lista = miembros()
+  assert.ok(!lista.includes(id), 'el aparato quitado sigue en el acta:\n' + lista)
 })
 
 // ---------- arranque ----------

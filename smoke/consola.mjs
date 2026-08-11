@@ -74,6 +74,12 @@ async function levantarBoveda () {
 
 const ctl = (cmd) => boveda.exec(`${BINARIO} --ctl ${cmd}`, { env: VAULT_ENV })
 const miembros = () => ctl('members').stdout || ''
+/** Los permisos que el acta le reconoce a un miembro (la línea que va debajo de su id). */
+function permisosDe (id, salida = miembros()) {
+  const lineas = salida.split('\n')
+  const i = lineas.findIndex((l) => l.includes(id))
+  return i >= 0 ? (lineas[i + 1] || '') : ''
+}
 const bitacora = () => ctl('activity 60').stdout || ''
 
 /** `dotrino-vault pair` EN EL PC (para el primer aparato: el admin todavía no existe). */
@@ -181,6 +187,34 @@ const GUION_RENOVAR = `
     fs.writeFileSync('/data/dev.json', JSON.stringify({ ...d, cert }))
     console.log('RES:' + JSON.stringify({ scope: cert.scope }))
   } catch (e) { console.log('ERR:' + e.message) }
+  process.exit(0)
+`
+
+/** Renunciar a firmar y que la bóveda lo selle en el acta. */
+const GUION_RENUNCIA = `
+  import fs from 'node:fs'
+  import { WebSocketProxyClient } from '/eco/dotrino-vault/node_modules/@dotrino/proxy-client/src/index.js'
+  import { installNodeGlobals } from '/eco/dotrino-vault/src/node-globals.js'
+  import { signWithDevice } from '/eco/dotrino-identity/vault/capabilities.js'
+  import * as Acta from '/eco/dotrino-identity/vault/acta.js'
+  import { MSG } from '/eco/dotrino-vault/lib/src/protocol.js'
+  installNodeGlobals('/data/ren2')
+  const { device, cert, iss } = JSON.parse(fs.readFileSync('/data/dev.json', 'utf8'))
+  // El registro lo firma el PROPIO miembro: la bóveda no mira ningún certificado.
+  const record = await Acta.makeRenounce({ member: device.publickey, caps: ['sign'], privateJwk: device.privateJwk })
+  const c = new WebSocketProxyClient({ url: process.env.PROXY, enableWebRTC: false, autoReconnect: false })
+  await c.connect()
+  const data = { op: 'renounce', record, publickey: device.publickey, ts: Date.now() }
+  const { signature } = await signWithDevice({ privateJwk: device.privateJwk, data })
+  const salida = new Promise((res) => {
+    c.on('message', (_f, p) => {
+      if (p?.type === MSG.RENOUNCE_RESULT) res({ ok: true, seq: p.seq })
+      else if (p?.type === MSG.ERROR) res({ ok: false, error: p.error })
+    })
+  })
+  c.sendByPubkey(iss, { type: MSG.RENOUNCE, data, signature, cert })
+  const r = await salida
+  console.log((r.ok ? 'RES:' : 'ERR:') + (r.ok ? JSON.stringify(r) : r.error))
   process.exit(0)
 `
 
@@ -442,6 +476,25 @@ escenario('renombrar un dispositivo: el nombre con el que lo reconoces', async (
     env: { ARGS: JSON.stringify({ method: 'secure.list' }) }, que: 'sus datos sensibles'
   })
   assert.ok(sigue.ok, 'renombrar no le quitó permisos: ' + sigue.error)
+})
+
+escenario('renunciar: el aparato se quita firmar y la bóveda lo SELLA en el acta', async () => {
+  // Renunciar no pasa por el Master (funciona con la bóveda apagada, que es cuando hace
+  // falta), pero tiene que LLEGAR al acta: una renuncia que solo vive en el aparato no es
+  // oponible a nadie —la bóveda le seguiría aceptando peticiones— y en el caso que la
+  // justifica, que te lo roben, su copia local no vale nada.
+  const r = await correrGuion('nuevo', GUION_RENUNCIA, { que: 'la renuncia' })
+  assert.ok(r.ok, 'la bóveda debería sellarla: ' + r.error)
+
+  const id = await idDe(nuevo.pub)
+  assert.ok(!/firma/.test(permisosDe(id)), 'el acta ya no le reconoce firmar:\n' + miembros())
+  assert.match(bitacora(), /renounce|renunci/i, 'y queda en la bitácora')
+
+  // Y el Master puede devolvérselo: si conceder no limpiara la renuncia, `effectiveCaps`
+  // la restaría para siempre y la promesa de la interfaz sería mentira.
+  ctl(`caps ${id} +firma`)
+  await sleep(1500)
+  assert.match(permisosDe(id), /firma/, 'el Master se lo devuelve:\n' + miembros())
 })
 
 escenario('quitar «administra» corta la administración EN EL ACTO', async () => {

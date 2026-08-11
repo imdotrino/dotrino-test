@@ -64,6 +64,23 @@ escenario('la consola abre y muestra el acta de este navegador', async () => {
   await page.close()
 })
 
+escenario('`/d` empareja y `/devices` administra: no son la misma página', async () => {
+  // Una pantalla es informativa o administrativa (CONVENCIONES §5.1), y emparejar es un
+  // proceso con su propia pantalla. `/d` es la dirección corta a la que apunta el QR:
+  // llegar ahí y encontrarte la consola entera es no saber ni en qué estás ni qué botón
+  // te toca.
+  const pair = await contexto.newPage()
+  await pair.goto(`${webConsola.url}/d?vault=${encodeURIComponent(webIframe.url + '/')}`)
+  await pair.waitForSelector('[data-testid="scan"]', { timeout: 30000 })
+  assert.equal(await pair.locator('[data-testid="members"]').count(), 0, '`/d` no lista dispositivos')
+  assert.equal(await pair.locator('[data-testid="self-toggle"]').count(), 0, '`/d` tampoco administra la bóveda de este aparato')
+  await pair.close()
+
+  const admin = await abrirConsola()
+  assert.equal(await admin.locator('[data-testid="members"] .member').count(), 1, '`/devices` sí lista')
+  await admin.close()
+})
+
 escenario('la landing explica cómo se USA, no solo cómo se descarga', async () => {
   const page = await contexto.newPage()
   await page.goto(webConsola.url + '/')
@@ -158,8 +175,13 @@ escenario('el navegador se empareja con la bóveda: enseña el código y entra e
   await aviso.locator('summary').click()
   assert.match(await aviso.innerText(), /[Bb]orrar|[Dd]elete|[Rr]emove/, 'y cómo deshacerse de una')
 
-  // Cerrarla es parte del camino real: hasta entonces la consola no se ve.
-  await page.click('[data-testid="flow-close"]', { timeout: 30000 })
+  // Cerrarla es parte del camino real, y ahora ADEMÁS cambia de página: `/d` empareja y
+  // nada más, así que «ver mis dispositivos» lleva a `/devices`, que es donde se
+  // administra. Una pantalla es informativa o administrativa, no las dos.
+  await Promise.all([
+    page.waitForURL(/\/devices/, { timeout: 30000 }),
+    page.click('[data-testid="flow-close"]', { timeout: 30000 })
+  ])
   await page.waitForSelector('[data-testid="members"] .member:nth-child(2)', { timeout: 30000 })
 
   const acta = vault.acta()

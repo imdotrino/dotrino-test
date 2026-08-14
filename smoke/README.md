@@ -102,6 +102,10 @@ Escenarios:
    sin preguntar. El acta lo recoge en los dos sentidos.
 5. La bóveda **no se echa a sí misma**: `V` sobre el master lo dice y no manda la orden.
 6. **`V` quita un aparato**: sale del acta y la bóveda **deja de firmarle**.
+7. Y al expulsado que **vuelve a llamar se le ATIENDE**: se le contesta y se le manda el
+   aviso **firmado** por la maestra, que es lo único que le borra la cuenta —un
+   «unauthorized» pelado no va firmado y no puede borrar nada (wipe-DoS). Si la bóveda le
+   colgara, el aparato se quedaría enseñando una cuenta que ya no existe.
 
 **Ya sirvió:** destapó dos averías de la TUI que no veía ninguna prueba unitaria — que
 aprobar guardaba los certificados pero **no el acta** (el aparato recién admitido no salía

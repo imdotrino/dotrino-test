@@ -29,7 +29,10 @@ const log = (m) => { if (VERBOSE) console.log(m) }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 // El cliente REAL de dispositivo: el aparato que se empareja no es una imitación.
-const { enroll, requestSign } = await import(path.join(ROOT, 'dotrino-vault/src/client.js'))
+const { enroll, requestSign, verifyRevoke } = await import(path.join(ROOT, 'dotrino-vault/src/client.js'))
+const { MSG } = await import(path.join(ROOT, 'dotrino-vault/lib/src/protocol.js'))
+const { signWithDevice } = await import(path.join(ROOT, 'dotrino-identity/vault/capabilities.js'))
+const { WebSocketProxyClient } = await import(path.join(ROOT, 'dotrino-proxy-client/src/index.js'))
 
 let proxy = null
 let vault = null
@@ -150,6 +153,42 @@ async function aparato (qr, label) {
   return { code, enrolado }
 }
 
+/**
+ * UN APARATO EXPULSADO QUE VUELVE A LLAMAR.
+ *
+ * La bóveda tiene que ATENDERLE —aunque su papel ya no valga— para poder mandarle el aviso
+ * FIRMADO, que es lo ÚNICO que le borra la cuenta: un «unauthorized» pelado no va firmado,
+ * así que el aparato tiene prohibido borrar nada con él (si no, cualquiera destruiría datos
+ * ajenos con un mensaje). Si la bóveda se limitara a colgarle, el aparato se quedaría
+ * enseñando una cuenta que ya no existe.
+ *
+ * Devuelve `{ error, aviso }`: lo que contestó y el aviso firmado, si llegó.
+ */
+async function llamaUnExpulsado ({ device, cert }) {
+  const client = new WebSocketProxyClient({ url: proxy.url, enableWebRTC: false, autoReconnect: false })
+  await client.connect()
+  try {
+    // Identificarse es lo que hace que el proxy le entregue lo que tuviera ENCOLADO.
+    const idData = { op: 'identify', publickey: device.publickey, token: client.token, ts: Date.now() }
+    const idSig = await signWithDevice({ privateJwk: device.privateJwk, data: idData })
+    await client.identify({ data: idData, signature: idSig.signature, cert })
+
+    let aviso = null
+    let error = null
+    const off = client.on('message', (_f, p) => {
+      if (p?.type === MSG.REVOKED) aviso = p
+      else if (p?.type === MSG.ERROR) error = p.error
+    })
+    const data = { op: 'sign', payload: { hola: 'sigo aquí' }, publickey: device.publickey, ts: Date.now() }
+    const { signature } = await signWithDevice({ privateJwk: device.privateJwk, data })
+    client.sendByPubkey(vault.iss, { type: MSG.SIGN, data, signature, cert })
+    const hasta = Date.now() + 12000
+    while (Date.now() < hasta && !(aviso && error)) await sleep(150)
+    off()
+    return { error, aviso }
+  } finally { try { client.close() } catch (_) {} }
+}
+
 const miembros = () => vault.acta()?.members || []
 const miembroDe = (pub) => miembros().find((m) => m.pub === pub)
 
@@ -158,6 +197,7 @@ const miembroDe = (pub) => miembros().find((m) => m.pub === pub)
 // ---------------------------------------------------------------------------
 
 let primero = null // el aparato del escenario 2, que administran los de más abajo
+let quitado = null // el que se expulsa al final, para comprobar que se le avisa
 
 escenario('la TUI abre, entra en la bóveda y la lista sale ENTERA (con la propia bóveda)', async () => {
   await tui.esperar(/Bóveda activa/)
@@ -304,6 +344,25 @@ escenario('quitar un aparato con V: sale del acta y la bóveda deja de firmarle'
     }),
     /unauthorized|no autorizado/,
     'quitarlo desde la TUI le corta el acceso de verdad, no solo en pantalla'
+  )
+
+  quitado = res
+})
+
+escenario('al expulsado que vuelve a llamar se le ATIENDE, para poder darle el aviso firmado', async () => {
+  assert.ok(quitado, 'hace falta el aparato que se quitó en el escenario anterior')
+  // Que la bóveda NO firme ya está probado arriba. Lo que se prueba aquí es lo contrario y
+  // es igual de importante: que no le cuelgue. Un aparato que fue tuyo tiene que poder
+  // llegar hasta la bóveda precisamente para que se le pueda mandar a paseo — el aviso
+  // firmado es lo único que le borra la cuenta, y si estaba apagado cuando lo quitaste,
+  // la única forma de dárselo es cuando vuelve.
+  const { error, aviso } = await llamaUnExpulsado(quitado)
+  assert.match(String(error || ''), /unauthorized/, 'se le contesta, no se le ignora')
+  assert.ok(aviso, 'y le llega el aviso de expulsión, no solo el error')
+  assert.equal(
+    await verifyRevoke({ body: aviso.body, signature: aviso.signature, master: vault.iss, devicePubkey: quitado.device.publickey }),
+    true,
+    'FIRMADO por la maestra y para ESTE aparato: es lo único que le puede borrar la cuenta'
   )
 })
 

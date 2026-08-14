@@ -215,6 +215,30 @@ escenario('la TUI abre, entra en la bóveda y la lista sale ENTERA (con la propi
   assert.ok(Date.now() - t0 < 6000, `la lista tarda lo que tarda el daemon (${Date.now() - t0} ms)`)
 })
 
+escenario('entrar en la bóveda trae TAMBIÉN las variables (Scopes no sale en blanco)', async () => {
+  // La variable se guarda con la TUI ya abierta: lo que ella tiene en memoria es de antes.
+  await vault.setSecret('proxy', 'TURN_KEY_ID', 'k-123', true)
+
+  // Salir a la lista de bóvedas y volver a entrar. Es el mismo camino que recorre quien
+  // acaba de teclear la contraseña de una bóveda con candado — y ahí la memoria está vacía
+  // a propósito, así que entrar TIENE que recargar. Antes solo se recargaba al CAMBIAR de
+  // bóveda, y lo que se recargaba eran los aparatos: Scopes se quedaba en blanco hasta que
+  // a alguien se le ocurriera pulsar F5.
+  await aDispositivos()
+  tui.teclas('\x1b')
+  await tui.esperar(/Bóveda activa/)
+  tui.teclas('\r')
+  await tui.esperar(/▐ Dispositivos/)
+  tui.teclas('\x1b[C') // → : la pestaña de al lado
+  const p = await tui.esperar(/proxy/, 8000)
+  assert.ok(!/sin scopes/.test(p), 'la variable está ahí sin tener que refrescar a mano')
+  assert.match(p, /TURN_KEY_ID/, 'con su nombre')
+  // Y como es PÚBLICA, se ve su valor: pública quiere decir que ese valor puede salir de
+  // esta máquina, así que taparlo aquí —en la máquina donde vive, delante de su dueño— era
+  // lo único que la marca no significaba.
+  assert.match(p, /k-123/, 'y con su valor, por ser pública')
+})
+
 escenario('emparejar con P: sale el QR, el aparato se conecta y con el código entra al acta', async () => {
   const qr = await abrirEmparejamiento()
   assert.match(tui.todo(), /vault\.dotrino\.com|http/, 'enseña el enlace para pegar')

@@ -169,6 +169,12 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {} } =
       signal('SIGUSR2')
       await sleep(600)
     },
+    /** `dotrino-vault secret set <ns> <CLAVE> <valor> [--public]`. */
+    async setSecret (ns, key, value, isPublic) {
+      writeReq('secret-request.json', { op: 'set', ns, key, value, ...(isPublic === undefined ? {} : { public: isPublic }) })
+      signal('SIGUSR2')
+      await sleep(600)
+    },
     /** `dotrino-vault devices` → volcado de delegaciones. */
     async devices (timeoutMs = 8000) {
       try { fs.rmSync(path.join(dir, 'devices.json'), { force: true }) } catch (_) {}

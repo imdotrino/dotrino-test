@@ -9,6 +9,7 @@ Las suites:
 
 ```sh
 npm run smoke                  # protocolo completo, todo en un proceso (rápido)
+npm run smoke:tui              # la TUI de la bóveda: emparejar y administrar a teclazos
 npm run smoke:dispositivos     # cada dispositivo en su propia máquina efímera
 npm run smoke:configuracion    # la CONFIGURACIÓN proxio ↔ bóveda, cada uno en su caja
 npm run smoke:consola          # la CONSOLA REMOTA: admitir a distancia, sin tocar el PC
@@ -72,6 +73,41 @@ disco propio en `/data`, red del host para llegar al proxy). Sin Docker cae a ca
 
 **Ya sirvió:** destapó que el binario «autosuficiente» no arranca en un Debian limpio porque
 le falta `libatomic1`. Ahora el `.deb` la declara y el README lo dice.
+
+## `smoke:tui` — emparejar y administrar DESDE LA TUI
+
+Las demás suites le hablan a la bóveda por su **CLI**. La **TUI** es código distinto —su
+propio canal (`vaultControl.js`), sus pantallas y su propio estado— y no la probaba nadie
+de punta a punta: los tres fallos del 2026-08-13 vivían todos ahí.
+
+Aquí se pilota la TUI **de verdad**: se abre en un terminal (un pty, con `script(1)`), se
+le teclean las mismas teclas que teclearía el dueño y se lee lo que dibuja. Lo que se
+comprueba no es el texto, es que **el acta de la bóveda cambie** como corresponde a cada
+tecla — y, en la última, que quitar un aparato le corte el acceso de verdad.
+
+No necesita compilar nada (corre la TUI desde el código) ni credenciales: proxy y bóveda
+locales, como el resto.
+
+Escenarios:
+
+1. Abre, entra en la bóveda y la lista sale **entera**: una bóveda recién hecha ya tiene un
+   miembro —ella misma—, así que *«sin dispositivos enrolados»* ahí no es una lista vacía,
+   es que **el acta no llegó**. Y llega en lo que tarda el daemon, no en seis segundos.
+2. **`P` empareja**: sale el QR, un aparato real se conecta, `A` + los seis dígitos, y entra
+   en el acta con su certificado — y **aparece en la lista sin refrescar a mano**.
+3. **Código equivocado**: se dice que no coincide, **no entra nadie**, y el pendiente sigue
+   ahí para reintentar con el bueno.
+4. **`C` son los permisos**: los cuatro en cristiano; *administrar* se **pregunta** antes de
+   darlo (es el que deja a ese aparato meter y sacar dispositivos sin venir aquí) y se quita
+   sin preguntar. El acta lo recoge en los dos sentidos.
+5. La bóveda **no se echa a sí misma**: `V` sobre el master lo dice y no manda la orden.
+6. **`V` quita un aparato**: sale del acta y la bóveda **deja de firmarle**.
+
+**Ya sirvió:** destapó dos averías de la TUI que no veía ninguna prueba unitaria — que
+aprobar guardaba los certificados pero **no el acta** (el aparato recién admitido no salía
+en la lista, y por eso «quitar el último» se llevaba por delante a otro), y que con el
+**código equivocado** la pantalla decía *«Dispositivo aprobado»*, se olvidaba del pendiente
+y dejaba al aparato esperando sin forma de reintentar.
 
 ## `smoke:configuracion` — de dónde saca su configuración un agente
 

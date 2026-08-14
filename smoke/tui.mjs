@@ -261,6 +261,43 @@ escenario('emparejar con P: sale el QR, el aparato se conecta y con el código e
   assert.match(lista, /[0-9A-F]{4}-[0-9A-F]{4}/, 'con su identificador legible')
 })
 
+escenario('un SERVICIO se empareja desde la TUI, y entra al acta con su cn', async () => {
+  // Esto solo existía en la línea de comandos (`pair --service <ns>`): la TUI llevaba al
+  // dueño hasta el QR y ahí lo dejaba, teniendo que salirse a la terminal para la única
+  // clase de aparato que luego lee variables. Ahora es la tercera opción de la pregunta.
+  await aDispositivos()
+  const t0 = Date.now()
+  tui.teclas('p')
+  await tui.esperar(/A qué cuenta|Cuenta nueva|Esta bóveda/i)
+  tui.teclas('\x1b[B\x1b[B\r')            // ↓ ↓ Enter: «Conectar un servicio»
+  await tui.esperar(/Qué servicio es/i)
+  tui.teclas('proxy\r')
+
+  // El QR dice QUÉ se está entregando: no es un aparato del dueño, es un papel que solo
+  // sirve para leer las variables de ese ns.
+  const p = await tui.esperar(/Cuenta que se comparte/)
+  assert.match(p, /SERVICIO «proxy»/, 'la pantalla avisa de que el QR es de un servicio')
+
+  tui.teclas('\x1b[F')
+  await sleep(400)
+  const qr = await invitacionEnPantalla(vault.dir, t0)
+  const svc = await aparato(qr, 'proxy-vps')
+
+  await tui.esperar(/Se conectó|PENDIENTE/)
+  tui.teclas('a')
+  await tui.esperar(/Código que MUESTRA/)
+  tui.teclas(svc.code + '\r')
+  await tui.esperar(/Dispositivo aprobado/)
+
+  const res = await svc.enrolado
+  assert.ok(res.cert, 'el servicio recibe su certificado')
+  const m = miembroDe(res.device.publickey)
+  assert.ok(m, 'y entra en el acta')
+  // LO QUE IMPORTA: el acta lo reconoce como el servicio «proxy». Sin `cn` no puede pedir
+  // sus variables (la bóveda mira el acta, no solo el scope del certificado).
+  assert.equal(m.cn, 'proxy', 'el acta lo reconoce como el servicio «proxy»')
+})
+
 escenario('CÓDIGO EQUIVOCADO: la TUI lo dice y NO da por aprobado a nadie', async () => {
   const antes = miembros().length
   const qr = await abrirEmparejamiento()

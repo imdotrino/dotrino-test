@@ -141,8 +141,14 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {} } =
     approve (code) { writeReq('approve-request.json', { code: String(code) }); signal('SIGUSR2') },
     /** `dotrino-vault reject <deviceId>`. */
     reject (deviceId) { writeReq('reject-request.json', { deviceId }); signal('SIGUSR2') },
-    /** `dotrino-vault revoke <nonce>`. */
+    /** `dotrino-vault revoke <nonce>` — retira UN certificado (el aparato sigue en el acta). */
     revoke (nonce) { writeReq('revoke-request.json', { nonce }); signal('SIGUSR2') },
+    /**
+     * QUITA EL APARATO entero (por su llave): sale del acta y se le retiran todos sus
+     * papeles. Es lo que hacen la TUI y la consola; `revoke(nonce)` retira un papel y deja
+     * al miembro dentro, que es otra cosa.
+     */
+    removeDevice (sub) { writeReq('revoke-request.json', { sub }); signal('SIGUSR2') },
     /** `dotrino-vault members` → el acta tal y como la ve la CLI. */
     async members (timeoutMs = 8000) {
       const f = path.join(dir, 'acta.json')

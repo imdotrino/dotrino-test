@@ -178,6 +178,55 @@ escenario('una cuenta que ya existe NO se la lleva la bóveda: se crea una cuent
   dev.destroy()
 })
 
+escenario('SIN papel y apagado cuando lo echaron: pregunta al arrancar y la bóveda lo borra', async () => {
+  // EL CASO QUE SE ESCAPABA. El aviso de expulsión se emite al quitar el aparato y viaja por
+  // la cola del proxy, que dura 24 h: si estaba apagado, no llega nunca. Y sin certificado
+  // —revocado, vencido o perdido— el aparato no puede firmar, ni leer, ni renovar, así que
+  // tampoco tenía forma de preguntar: se quedaba enseñando para siempre una cuenta de la que
+  // ya lo habían echado. Ahora, al arrancar, pregunta con su propia llave (que es lo que el
+  // acta nombra) y la bóveda le contesta con el aviso FIRMADO.
+  const dir = tmpDir('sin-papel')
+  const yo = await Identity.connect({ dir })
+  await yo.createProfile('Bóveda', { forVault: true })
+
+  const qr = await vault.pair({ label: 'olvidado' })
+  let code = null
+  const off = yo.onVault((e) => { if (e.phase === 'challenge') code = e.code })
+  const p = yo.enrollDevice(qr)
+  await vault.waitPending()
+  const t = Date.now() + 8000
+  while (!code && Date.now() < t) await new Promise((r) => setTimeout(r, 50))
+  vault.approve(code)
+  await p
+  off()
+  const mio = yo.me.publickey
+  assert.ok(vault.acta().members.some((m) => m.pub === mio), 'entró en el acta')
+  yo.destroy()
+
+  // Se le quita el papel a mano: ese es el aparato que perdió su certificado.
+  const f = path.join(dir, 'identity.json')
+  const kv = JSON.parse(fs.readFileSync(f, 'utf8'))
+  for (const k of Object.keys(kv)) if (/dotrino\.identity\.vault\.(cert|device)$/.test(k)) delete kv[k]
+  fs.writeFileSync(f, JSON.stringify(kv))
+
+  // Y se le echa mientras está apagado: el aviso se emite contra nadie y caduca.
+  vault.removeDevice(mio)
+  await new Promise((r) => setTimeout(r, 1500))
+  assert.ok(!vault.acta().members.some((m) => m.pub === mio), 'la bóveda ya no lo tiene')
+
+  // Enciende. Al arrancar pregunta, y la respuesta le borra la cuenta de la bóveda.
+  const otra = await Identity.connect({ dir })
+  const hasta = Date.now() + 20000
+  let fuera = false
+  while (Date.now() < hasta && !fuera) {
+    const acta = await otra.profileActa().catch(() => null)
+    fuera = !acta?.acta || acta.acta.profileId !== vault.acta().profileId
+    if (!fuera) await new Promise((r) => setTimeout(r, 300))
+  }
+  otra.destroy()
+  assert.ok(fuera, 'la cuenta de la que lo echaron se fue de este aparato, sin que nadie pulsara nada')
+})
+
 escenario('el proxy verifica el acta y bindea el perfil (y rechaza una manipulada)', async () => {
   // Un dispositivo enrolado se identifica presentando su cert y su acta.
   const d = await dispositivo(vault, { label: 'con-acta' })

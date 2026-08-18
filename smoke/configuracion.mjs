@@ -330,6 +330,39 @@ escenario('el proxio se enrola y la bóveda le CEDE la configuración: pisa el .
   assert.equal(falsoVault.ultimo().auth, 'Bearer token-del-vault', 'incluso el token es el del vault')
 })
 
+escenario('SIN CONTRASEÑA la bóveda sigue sellando: el valor no está en claro en su disco', async () => {
+  // La bóveda de este smoke no tiene contraseña, que es como arranca cualquiera. Eso
+  // NO significa «sin cifrar»: las variables privadas siguen selladas a la llave de
+  // cada aparato, y lo único que cambia es con qué se abre la copia maestra (la llave
+  // de esta máquina en vez de una frase).
+  //
+  // La diferencia práctica es honesta y hay que decirla: como el material de esa llave
+  // vive en el mismo disco, quien se lleve el disco la reconstruye. Lo que se comprueba
+  // aquí es que la maquinaria está puesta —los sobres son sobres— para que el día que
+  // haya frase proteja de verdad sin migrar nada.
+  const dir = '/data/vault'
+  // El valor del vault que está en efecto ahora mismo (privado por defecto).
+  const buscado = VAULT_KEY_ID
+
+  // 1. En el archivo, tal cual: ni rastro del valor. Va cifrado en reposo Y sellado.
+  // El archivo puede estar en el dir del perfil o en la raíz, según cómo se creó.
+  const donde = (boveda.exec(`find ${dir} -name secrets.json 2>/dev/null | head -1`).stdout || '').trim()
+  assert.ok(donde, `debería existir un secrets.json bajo ${dir}`)
+  const crudo = boveda.exec(`head -c 4000 ${donde}`).stdout || ''
+  assert.ok(!crudo.includes(buscado), 'el valor de una privada NO puede aparecer en el archivo')
+
+  // 2. Y la lista de la propia bóveda lo tapa, en vez de enseñarlo.
+  const lista = ctl('secret list').stdout || ''
+  assert.ok(lista.includes('TURN_KEY_ID'), 'la variable tiene que estar')
+  assert.ok(!lista.includes(buscado), 'pero su valor no se enseña: es privada')
+
+  // 3. Lo definitivo: el proxio SÍ lo está usando. O sea que el sobre se abre por el
+  //    camino bueno —con la llave del aparato— aunque el archivo sea ilegible.
+  const turn = await pedirTurn()
+  assert.equal(turn.quien, 'vault', 'el proxio usa el valor del vault, que solo obtiene abriendo su sobre')
+  assert.equal(turn.keyId, buscado, 'y es exactamente el valor sellado, abierto con la llave del aparato')
+})
+
 escenario('el proxio NO espera a la bóveda: con ella caída, el transporte sirve igual', async () => {
   // Es LA excepción del ecosistema, y no por importancia: el vault le habla a sus
   // servicios POR el proxio, así que un proxio que lo espera espera a alguien que

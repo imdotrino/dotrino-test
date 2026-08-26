@@ -108,7 +108,7 @@ async function abrirConsola (hash = '') {
   page.on('console', (m) => log('[navegador] ' + m.text()))
   page.on('pageerror', (e) => log('[navegador!] ' + e.message))
   await page.goto(
-    `${webConsola.url}/dispositivos?vault=${encodeURIComponent(webIframe.url + '/')}${hash}`
+    `${webConsola.url}/vault?vault=${encodeURIComponent(webIframe.url + '/?proxy=' + encodeURIComponent(proxy.url))}&proxy=${encodeURIComponent(proxy.url)}${hash}`
   )
   // Con invitación en el fragmento la consola se va DIRECTA al proceso, y entonces la
   // lista de miembros no se pinta: se espera a lo que llegue primero.
@@ -205,7 +205,7 @@ try {
   webConsola = await servirEstatico(CONSOLA, { spa: true })
   webIframe = await servirEstatico(IFRAME)
   console.log(`  proxy     ${proxy.url}  (con identidad de nodo: emite citas)`)
-  console.log(`  consola   ${webConsola.url}/dispositivos   ← ${CONSOLA}`)
+  console.log(`  consola   ${webConsola.url}/vault   ← ${CONSOLA}`)
   console.log(`  identidad ${webIframe.url}  (el iframe, en otro origen)\n`)
 
   navegador = await chromium.launch({ headless: !VERBOSE })

@@ -31,12 +31,21 @@ let webIframe = null
 let navegador = null
 let contexto = null
 
+/**
+ * La URL del iframe de identidad para las pruebas: el de disco y, dentro, el proxio de
+ * aquí. `?proxy=` solo se atiende en localhost, y hace falta porque `/vault` enciende el
+ * mostrador de esta bóveda sola: sin decirle a dónde, marcaría a producción, y este
+ * escenario promete no tocarla. La consola lleva el mismo parámetro, por el mostrador de
+ * contraseñas, que abre su propia conexión.
+ */
+const iframeUrl = () => `${webIframe.url}/?proxy=${encodeURIComponent(proxy.url)}`
+
 /** Abre la consola apuntando al iframe LOCAL (el `?vault=` solo lo acepta en localhost). */
 async function abrirConsola (hash = '') {
   const page = await contexto.newPage()
   page.on('console', (m) => log('[navegador] ' + m.text()))
   page.on('pageerror', (e) => log('[navegador!] ' + e.message))
-  await page.goto(`${webConsola.url}/dispositivos?vault=${encodeURIComponent(webIframe.url + '/')}${hash}`)
+  await page.goto(`${webConsola.url}/vault?vault=${encodeURIComponent(iframeUrl())}&proxy=${encodeURIComponent(proxy.url)}${hash}`)
   // Entrando CON invitación la pantalla es SOLO el emparejamiento (por diseño: llegar por
   // un QR y encontrarte la consola entera es no entender ni que estás en medio de algo ni
   // qué botón te toca), así que la lista de miembros no existe todavía. Esperarla siempre
@@ -58,27 +67,52 @@ escenario('la consola abre y muestra el acta de este navegador', async () => {
   const aviso = await page.locator('[data-testid="solo-warning"]').innerText()
   assert.match(aviso, /pierdes el perfil/i, 'dice en voz alta que perderlo es perder el perfil')
 
-  // Y sus permisos salen marcados (es un dispositivo, no un servicio).
+  // Y sus permisos salen marcados (es un dispositivo, no un servicio). Viven dentro del
+  // acordeón de su fila, así que primero se abre — que es lo que haría la persona.
+  await page.locator('.member .who.acc').first().click()
   const firma = page.locator('.member .cap').first()
   assert.match(await firma.innerText(), /Firma/i)
   await page.close()
 })
 
-escenario('`/d` empareja y `/devices` administra: no son la misma página', async () => {
+escenario('`/d` empareja y `/vault` administra: no son la misma página', async () => {
   // Una pantalla es informativa o administrativa (CONVENCIONES §5.1), y emparejar es un
   // proceso con su propia pantalla. `/d` es la dirección corta a la que apunta el QR:
   // llegar ahí y encontrarte la consola entera es no saber ni en qué estás ni qué botón
   // te toca.
   const pair = await contexto.newPage()
-  await pair.goto(`${webConsola.url}/d?vault=${encodeURIComponent(webIframe.url + '/')}`)
+  await pair.goto(`${webConsola.url}/d?vault=${encodeURIComponent(iframeUrl())}`)
   await pair.waitForSelector('[data-testid="scan"]', { timeout: 30000 })
   assert.equal(await pair.locator('[data-testid="members"]').count(), 0, '`/d` no lista dispositivos')
-  assert.equal(await pair.locator('[data-testid="self-toggle"]').count(), 0, '`/d` tampoco administra la bóveda de este aparato')
+  assert.equal(await pair.locator('[data-testid="vault-at"]').count(), 0, '`/d` tampoco dice dónde vive tu bóveda ni la administra')
   await pair.close()
 
   const admin = await abrirConsola()
-  assert.equal(await admin.locator('[data-testid="members"] .member').count(), 1, '`/devices` sí lista')
+  assert.equal(await admin.locator('[data-testid="members"] .member').count(), 1, '`/vault` sí lista')
   await admin.close()
+})
+
+escenario('`/vault` decide sola: sin bóveda fuera, ESTE aparato es la bóveda y se pone a escuchar', async () => {
+  // Lo que hay que comprobar no es que exista una casilla, es que NO haga falta: un
+  // navegador que no está en ninguna bóveda es su propia bóveda, y su mostrador tiene
+  // que estar atendiendo sin que nadie encienda nada.
+  const page = await abrirConsola()
+  const donde = page.locator('[data-testid="vault-at"]')
+  assert.equal(await donde.getAttribute('data-where'), 'self', 'la bóveda de un aparato sin emparejar es él mismo')
+
+  // Y ESCUCHA de verdad: el botón que da el código para el aparato siguiente solo se
+  // habilita con el mostrador en marcha (`self.running`), o sea con el daemon conectado
+  // al proxio. Es la diferencia entre decirlo en pantalla y estar haciéndolo.
+  await page.waitForSelector('[data-testid="self-pair"]:not([disabled])', { timeout: 30000 })
+  assert.match(await donde.innerText(), /escuchando|listening/i, 'y lo dice donde se ve')
+
+  // Y atiende las DOS cosas que se le piden a una bóveda: aparatos y contraseñas. El
+  // código para enlazar la extensión es lo que la extensión viene a buscar a esta
+  // dirección; cuando `/vault` era otra página, esto se quedó fuera al unirlas.
+  await page.waitForSelector('[data-testid="vault-code"]', { timeout: 30000 })
+  assert.ok((await page.locator('[data-testid="vault-code"]').innerText()).length > 20,
+    'el código para enlazar la extensión está a la vista')
+  await page.close()
 })
 
 escenario('la landing explica cómo se USA, no solo cómo se descarga', async () => {
@@ -92,23 +126,11 @@ escenario('la landing explica cómo se USA, no solo cómo se descarga', async ()
   assert.match(texto, /[Cc]onectar un teléfono/, 'cómo conectar un aparato')
   assert.match(texto, /pierdes un aparato/i, 'qué hacer si pierdes uno')
 
-  // La pantalla de control y, sobre todo, cómo abrirla en Windows: es lo que el dueño
-  // fue a buscar a la página y no estaba.
-  const tui = await page.locator('[data-testid="use-tui"]').innerText()
-  assert.match(tui, /--tui/, 'el modo todo-en-una-ventana')
-  assert.match(tui, /dotrino-vault tui/, 'y abrirla sola si la bóveda ya corre')
-  assert.match(tui, /\.dotrino/, 'y el PATH de Windows, que es donde se atasca la gente')
-
-  // Los comandos van APARTE, detrás de un desplegable: la promesa se lee sin saber de
-  // tecnología (CONVENCIONES §9.1) y quien quiera terminal la encuentra.
-  await page.locator('.use-cmds summary').click()
-  assert.match(await uso.innerText(), /dotrino-vault members/, 'los comandos, para quien los quiera')
-
-  // Y la consecuencia asumida del modelo, destacada y no escondida en una nota al pie:
-  // si pierdes la máquina sin haber conectado otra bóveda, pierdes la cuenta.
-  const aviso = await page.locator('[data-testid="use-warn"]').innerText()
-  assert.match(aviso, /pierdes la cuenta/i, 'lo dice en voz alta')
-  assert.match(aviso, /no hay|ninguna|recuperar/i, 'y que no hay rescate')
+  // §9.2: EL HOME NO DOCUMENTA. Cada cosa se cuenta en una frase y enlaza su página del
+  // wiki; los comandos y las recetas viven allá. Esto se comprueba por lo que NO hay:
+  // antes esta misma sección llevaba dentro los comandos y el PATH de Windows.
+  assert.equal(await uso.locator('code, pre').count(), 0, 'ni un bloque de comandos en la landing')
+  assert.ok(await uso.locator('a[href*="wiki.dotrino.com"]').count() > 0, 'y cada tarjeta enlaza su guía')
   await page.close()
 })
 
@@ -125,18 +147,18 @@ escenario('la descarga ofrece las TRES formas en los TRES sistemas', async () =>
     if (so === 'linux') assert.match(inst, /\.deb|instalador/i, `${so}: hay instalador`)
     else assert.match(inst, /en camino/i, `${so}: dice que el instalador aún no está`)
 
-    // 2 · un comando: PowerShell en Windows, terminal en los demás.
-    const cmd = await page.locator('[data-testid="m-command"]').innerText()
-    assert.match(cmd, /@dotrino\/vaultd/, `${so}: el comando`)
-    assert.match(cmd, so === 'windows' ? /irm https/ : /curl -fsSL/, `${so}: el comando de su sistema`)
-    // Y la bóveda CON su pantalla de control, en el mismo comando: el dueño la buscó ahí
-    // y estaba tres pantallas más abajo, en «Cómo se usa».
-    assert.match(cmd, /--tui/, `${so}: el comando único con pantalla de control`)
+    // 2 · un comando y 3 · docker: existen en los tres sistemas, con su promesa en una
+    // frase. El COMANDO en sí ya no está aquí (§9.2: el home no documenta), está en el
+    // wiki — por eso lo que se comprueba es el enlace, no el `curl`.
+    assert.match(await page.locator('[data-testid="m-command"]').innerText(), /comando/i, `${so}: la vía del comando`)
+    assert.match(await page.locator('[data-testid="m-docker"]').innerText(), /docker/i, `${so}: la vía de Docker`)
 
-    // 3 · docker: igual en los tres, con la nota que corresponde.
-    const dk = await page.locator('[data-testid="m-docker"]').innerText()
-    assert.match(dk, /ghcr\.io\/imdotrino\/dotrino-vault/, `${so}: la imagen`)
-    assert.match(dk, so === 'linux' ? /no escucha nada/i : /Docker Desktop/, `${so}: la nota de su sistema`)
+    for (const guia of ['guide-linux', 'guide-npx', 'guide-docker']) {
+      const href = await page.locator(`[data-testid="${guia}"]`).getAttribute('href')
+      assert.match(href || '', /wiki\.dotrino\.com/, `${so}: ${guia} enlaza el wiki`)
+    }
+    assert.equal(await page.locator('#download code, #download pre').count(), 0,
+      `${so}: la descarga no lleva bloques de comandos`)
   }
   await page.close()
 })
@@ -176,10 +198,10 @@ escenario('el navegador se empareja con la bóveda: enseña el código y entra e
   assert.match(await aviso.innerText(), /[Bb]orrar|[Dd]elete|[Rr]emove/, 'y cómo deshacerse de una')
 
   // Cerrarla es parte del camino real, y ahora ADEMÁS cambia de página: `/d` empareja y
-  // nada más, así que «ver mis dispositivos» lleva a `/devices`, que es donde se
+  // nada más, así que «ver mis dispositivos» lleva a `/vault`, que es donde se
   // administra. Una pantalla es informativa o administrativa, no las dos.
   await Promise.all([
-    page.waitForURL(/\/devices/, { timeout: 30000 }),
+    page.waitForURL(/\/vault/, { timeout: 30000 }),
     page.click('[data-testid="flow-close"]', { timeout: 30000 })
   ])
   await page.waitForSelector('[data-testid="members"] .member:nth-child(2)', { timeout: 30000 })
@@ -188,6 +210,13 @@ escenario('el navegador se empareja con la bóveda: enseña el código y entra e
   assert.equal(acta.members.length, 2, 'la bóveda lo admitió en su acta')
   const enPantalla = await page.locator('[data-testid="members"] .member').count()
   assert.equal(enPantalla, 2, 'y la consola ya muestra los dos')
+
+  // Y la página cambió de papel sola: ya hay bóveda fuera, así que este aparato deja de
+  // hacer de mostrador y pasa a hablar con ella. Dos bóvedas para una cuenta no existen.
+  assert.equal(await page.locator('[data-testid="vault-at"]').getAttribute('data-where'), 'remote',
+    'con la bóveda emparejada, la de este perfil ya no es este aparato')
+  assert.equal(await page.locator('[data-testid="self-pair"]').count(), 0,
+    'y no ofrece conectar aparatos a un mostrador que ya no es el suyo')
 
   // Ahora el Master es la bóveda, no este navegador. (Se llamaba «manda» hasta que el
   // dueño fijó el término: es el Master del acta, y así se llama en el modelo, en los
@@ -289,7 +318,7 @@ try {
   webConsola = await servirEstatico(CONSOLA, { spa: true })
   webIframe = await servirEstatico(IFRAME)
   console.log(`  proxy    ${proxy.url}`)
-  console.log(`  consola  ${webConsola.url}/dispositivos`)
+  console.log(`  consola  ${webConsola.url}/vault`)
   console.log(`  identidad ${webIframe.url}  (el iframe, en otro origen)\n`)
 
   navegador = await chromium.launch({ headless: !VERBOSE })

@@ -22,16 +22,17 @@
   </script>
 </head>
 <body>
-  <dotrino-support floating lang="es" href="https://ko-fi.com/dotrino" repo="imdotrino/dotrino-test" discord="https://discord.gg/D648uq7cth"></dotrino-support>
-
-  <header>
-    <div class="brand"><img src="/icon.svg" alt="" /><b>Test</b><span data-i18n="tagline">· sandbox Dotrino</span></div>
-    <div class="lang-selector" role="group" aria-label="es / en">
-      <button data-lang="es">ES</button>
-      <button data-lang="en">EN</button>
-    </div>
-    <div id="mode" class="mode"></div>
-  </header>
+  <dotrino-topbar
+    brand="Test"
+    icon="/icon.svg"
+    brand-href="./"
+    profile
+    support-href="https://ko-fi.com/dotrino"
+    support-repo="imdotrino/dotrino-test"
+    support-discord="https://discord.gg/D648uq7cth">
+    <span class="tagline" data-i18n="tagline">· sandbox Dotrino</span>
+    <div id="mode" class="mode" slot="end"></div>
+  </dotrino-topbar>
 
   <main>
     <section class="card">
@@ -86,6 +87,5 @@
   </main>
 
   <script type="module" src="/src/main.js"></script>
-  <script type="module" src="https://cdn.jsdelivr.net/npm/@dotrino/support@0.6/src/index.js"></script>
 </body>
 </html>

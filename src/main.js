@@ -1,3 +1,6 @@
+import '@dotrino/topbar'   // marca + idioma + perfil (§6.1) + support (§6)
+import { Identity } from '@dotrino/identity'
+import { createVaultReputation } from '@dotrino/reputation'
 import './style.css'
 
 // NO es PWA a propósito: sin service worker ni botón de instalar (ver index.html
@@ -46,21 +49,21 @@ const messages = {
   },
 }
 
+// El idioma lo lleva <dotrino-topbar> (§5): él tiene el toggle, lo persiste en
+// «dotrino.lang» y pone document.documentElement.lang. Aquí solo se lee y se
+// escucha su evento para traducir la copy de la página.
 let lang = (() => {
-  const saved = localStorage.getItem('test.lang')
-  if (saved === 'es' || saved === 'en') return saved
+  let guardado
+  try { guardado = localStorage.getItem('dotrino.lang') } catch (_) {}
+  if (guardado === 'es' || guardado === 'en') return guardado
   return (navigator.language || 'es').toLowerCase().startsWith('en') ? 'en' : 'es'
 })()
 const t = (k) => (messages[lang] || messages.es)[k] ?? k
 
 function applyI18n () {
-  document.documentElement.lang = lang
   document.querySelectorAll('[data-i18n]').forEach((el) => { el.innerHTML = t(el.dataset.i18n) })
-  document.querySelectorAll('dotrino-support').forEach((el) => el.setAttribute('lang', lang))
-  document.querySelectorAll('.lang-selector button').forEach((b) => b.classList.toggle('on', b.dataset.lang === lang))
   refreshMode()
 }
-function setLang (l) { lang = l; localStorage.setItem('test.lang', l); applyI18n() }
 
 // ---------- estado de display-mode ----------
 function refreshMode () {
@@ -107,9 +110,24 @@ document.getElementById('methods').addEventListener('click', (e) => {
 })
 document.getElementById('real-link').addEventListener('click', () => log(t('logD')))
 document.getElementById('clear').addEventListener('click', () => { logEl.textContent = '' })
-document.querySelector('.lang-selector').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-lang]'); if (b) setLang(b.dataset.lang)
+const topbar = document.querySelector('dotrino-topbar')
+topbar?.addEventListener('dotrino-lang', (e) => {
+  lang = e.detail?.lang === 'en' ? 'en' : 'es'
+  applyI18n()
 })
+
+// Identidad + reputación: las pide el botón de perfil del topbar (§6.1). Sin vault
+// alcanzable quedan sin poner y el botón no abre el modal; el sandbox sigue entero.
+;(async () => {
+  try {
+    const id = await Identity.connect()
+    if (!topbar || !id) return
+    topbar.identity = id
+    topbar.reputation = createVaultReputation(id)
+  } catch (e) {
+    console.warn('[identity] vault unreachable:', e && e.message)
+  }
+})()
 
 applyI18n()
 const inPwa = refreshMode()

@@ -1,0 +1,25 @@
+<!doctype html><meta charset="utf-8"><title>timbre</title>
+<script type="module">
+window.__timbres = []
+navigator.serviceWorker.addEventListener('message', (e) => {
+  if (e.data?.tipo === 'timbre') window.__timbres.push(e.data)
+})
+const { WebSocketProxyClient } = await import('./pc/client.js')
+const { getPublicKeyJwk, signData } = await import('./pc/signature.js')
+window.__listo = (async () => {
+  const reg = await navigator.serviceWorker.register('./sw.js')
+  await navigator.serviceWorker.ready
+  const c = new WebSocketProxyClient({ url: 'wss://proxy.dotrino.com', enableWebRTC: false, autoReconnect: false })
+  // Lo que llegue queda anotado: al reconectar, el proxio baja la cola de lo que quedó
+  // esperando, y si nadie escucha se pierde sin dejar rastro.
+  window.__mensajes = []
+  c.on('message', (...a) => window.__mensajes.push(a.map((x) => (typeof x === 'string' ? x : JSON.stringify(x)))))
+  await c.connect()
+  const publickey = await getPublicKeyJwk()
+  const data = { op: 'identify', publickey, token: c.token, ts: Date.now() }
+  await c.identify({ data, signature: await signData(data) })
+  await c.enablePush({ publicKey: publickey, sign: signData, registration: reg })
+  window.__cliente = c
+  return { publickey, token: c.token }
+})()
+</script>

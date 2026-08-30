@@ -15,6 +15,7 @@
     "smoke:configuracion": "node smoke/configuracion.mjs",
     "smoke:consola": "node smoke/consola.mjs",
     "smoke:gestor": "node smoke/gestor.mjs",
+    "prod:timbre": "node produccion/timbre.mjs",
     "type-check": "tsc --noEmit"
   },
   "devDependencies": {

@@ -49,6 +49,23 @@ const iframeUrl = () => `${webIframe.url}/?proxy=${encodeURIComponent(proxy.url)
 /** La consola en modo bóveda: sin otra fuera, `/vault` enciende su propio mostrador. */
 async function abrirConsola () {
   const page = await contexto.newPage()
+  // El aviso se manda por el service worker. Aquí se anota en vez de enseñarse: lo que
+  // se comprueba es que la bóveda avisa, no el aspecto del globo del sistema.
+  await page.addInitScript(() => {
+    window.__avisos = []
+    const esperar = () => navigator.serviceWorker?.ready?.then((reg) => {
+      if (!reg || reg.__espiado) return
+      reg.__espiado = true
+      const real = reg.showNotification?.bind(reg)
+      void real
+      reg.showNotification = (titulo, opts) => {
+        window.__avisos.push({ titulo, tag: opts?.tag, body: opts?.body })
+        return Promise.resolve()
+      }
+    }).catch(() => {})
+    esperar()
+    window.addEventListener('load', esperar)
+  })
   page.on('console', (m) => { if (LOGS || m.type() === 'error') console.log('   [consola] ' + m.text()) })
   page.on('pageerror', (e) => console.log('   [consola!] ' + e.message))
   await page.goto(`${webConsola.url}/vault?vault=${encodeURIComponent(iframeUrl())}&proxy=${encodeURIComponent(proxy.url)}`)
@@ -247,6 +264,42 @@ escenario('los dominios y el buscador del gestor también funcionan enlazados', 
     'y buscar por texto llega a la entrada aunque no estés en su sitio')
 })
 
+escenario('con la pestaña en segundo plano, la bóveda AVISA en vez de callarse', async () => {
+  const { popup, consola } = estado
+
+  // El interruptor está a la vista, y no se pide el permiso solo al abrir: un navegador
+  // que pregunta sin que hayas pulsado nada es un navegador que molesta.
+  assert.equal(await consola.locator('[data-testid="ring-enable"], [data-testid="ring-on"]').count(), 1,
+    'la bóveda ofrece encender los avisos')
+
+  // La aprobación se recuerda por APARATO (§2.0) y ya se dijo que sí, así que no
+  // volvería a preguntar. Se recarga la consola: la puerta vive en memoria, y apagar la
+  // bóveda retira lo aprobado — eso es el diseño, no un atajo del test.
+  await consola.reload()
+  await consola.waitForSelector('[data-testid="vault-at"][data-where="self"]', { timeout: 40000 })
+  await consola.locator('[data-testid="password-device"]').first().waitFor({ timeout: 40000 })
+  await consola.evaluate(() => { window.__avisos.length = 0 })
+
+  // Y la pestaña deja de estar delante. En `--headless=new` TODAS se declaran visibles,
+  // así que la condición se fuerza: lo que se prueba es qué hace la bóveda cuando nadie
+  // la mira, no si Chrome sabe decirlo sin escritorio.
+  await popup.bringToFront()
+  await consola.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true })
+  })
+
+  const pide = pedir(popup, 'get', { id: estado.id, keys: ['secret'] })
+  await consola.waitForFunction(() => (window.__avisos || []).length > 0, null, { timeout: 30000 })
+  const avisos = await consola.evaluate(() => window.__avisos)
+  assert.ok(avisos.some((a) => a.tag === 'dotrino-vault-ask'),
+    'avisa que hay algo esperando: ' + JSON.stringify(avisos))
+
+  // Y la pregunta sigue en su sitio: el aviso llama, no decide.
+  await consola.bringToFront()
+  await consola.locator('[data-testid="approve"]').click()
+  assert.equal((await pide)?.result?.secret, 'hunter2', 'y al volver, se contesta desde la pantalla')
+})
+
 // ---------- arranque ----------
 
 console.log('\nSMOKE · la extensión con la bóveda de PESTAÑA, todo en local\n')
@@ -281,6 +334,10 @@ try {
     ],
     viewport: { width: 1100, height: 900 },
   })
+  // Los avisos, concedidos de entrada: es lo que hace el usuario al pulsar el botón, y
+  // concederlos a mitad de camino obliga a recargar la consola en medio de la prueba.
+  await contexto.grantPermissions(['notifications'])
+
   const sw = contexto.serviceWorkers()[0] || await contexto.waitForEvent('serviceworker', { timeout: 20000 })
   extId = new URL(sw.url()).host
   console.log(`  extensión ${extId}\n`)

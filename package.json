@@ -14,6 +14,7 @@
     "smoke:interfaz": "node smoke/interfaz.mjs",
     "smoke:configuracion": "node smoke/configuracion.mjs",
     "smoke:consola": "node smoke/consola.mjs",
+    "smoke:gestor": "node smoke/gestor.mjs",
     "type-check": "tsc --noEmit"
   },
   "devDependencies": {

@@ -175,6 +175,16 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {} } =
       signal('SIGUSR2')
       await sleep(600)
     },
+    /**
+     * `dotrino-vault caps <ID> +permiso` — marca (o desmarca) un aparato como SUPERVISADO:
+     * a partir de ahí, cada vez que pida una llave privada hace falta que alguien lo
+     * apruebe. Es la propiedad del APARATO, no de la credencial (§2.0).
+     */
+    async approval (pub, on = true) {
+      writeReq('secret-request.json', { op: 'approval', pub, approval: !!on })
+      signal('SIGUSR2')
+      await sleep(600)
+    },
     /** `dotrino-vault devices` → volcado de delegaciones. */
     async devices (timeoutMs = 8000) {
       try { fs.rmSync(path.join(dir, 'devices.json'), { force: true }) } catch (_) {}

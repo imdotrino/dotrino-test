@@ -21,17 +21,19 @@
  *
  * Requiere el binario:  cd dotrino-vault && bash packaging/build.sh
  *
- * ⚠️ ESTADO: 3 de 4 escenarios pasan. El cuarto está ROJO A PROPÓSITO y nombra lo que
- * falta, en vez de esconderlo:
+ * ESTADO: 4 de 4 (2026-08-30). Estuvo tres tandas en 3/4, y los tres fallos que hubo que
+ * arreglar para cerrarlo merecen quedar escritos, porque ninguno se veía desde fuera:
  *
- *   `join` mete la cuenta ajena en una cuenta NUEVA de la capa de identidad, y el gestor
- *   de perfiles del daemon no se entera. Resultado: no hay instancia de bóveda para esa
- *   cuenta, nadie se identifica en el proxio con esa llave, y el aviso que manda A
- *   —con el acta donde acaba de conceder `sella`— no llega a ninguna parte. B sigue
- *   creyendo que no puede sellar y no admite a nadie.
- *
- *   Lo que hay que arreglar: que `join` cree un PERFIL DEL GESTOR, como hace
- *   `pair --adopt`, en vez de una cuenta interna de la identidad.
+ *   1. `join` metía la cuenta ajena en una cuenta interna de la capa de identidad, y el
+ *      gestor de perfiles del daemon no se enteraba: no había instancia de bóveda para
+ *      ella y nadie se identificaba en el proxio con esa llave. Ahora `join` crea un
+ *      PERFIL DEL GESTOR, como `pair --adopt`.
+ *   2. Los avisos iban solo a `listDelegations().issued` —lo que ESTA bóveda enroló—, y
+ *      la segunda bóveda entró por `join`, así que la delegación la había emitido la
+ *      primera. Cuando la segunda sellaba, no tenía a quién avisar. Ahora se avisa a los
+ *      MIEMBROS DEL ACTA, que es la lista correcta.
+ *   3. Tras `join`, la cuenta adoptada no quedaba como la activa, así que aprobar un
+ *      aparato lo metía en el `Perfil 1` vacío del primer arranque —sin decir nada—.
  */
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -193,11 +195,7 @@ escenario('con el permiso, B admite un aparato ELLA SOLA y A adopta ese acta', a
 
   B.ctl(`approve ${codigoTel}`)
   const ok = await esperar(() => lineas.find((l) => l.startsWith('OK:')), {
-    que: 'que el teléfono acabe de enrolarse por B.\n' +
-      '      SE SABE POR QUÉ FALLA (ver la cabecera): `join` deja la cuenta en una cuenta\n' +
-      '      interna de la identidad que el gestor de perfiles del daemon no conoce, así que\n' +
-      '      B no se identifica con esa llave, no recibe el acta donde A le dio `sella`, y\n' +
-      '      sigue sin poder admitir. Arreglo: que `join` cree un perfil del gestor.'
+    que: 'que el teléfono acabe de enrolarse por B (sin que A intervenga)'
   })
   const idTel = await idDe(JSON.parse(ok.slice(3)).pub)
   log('[test] el teléfono entró por B: ' + idTel)

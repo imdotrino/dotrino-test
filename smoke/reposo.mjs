@@ -31,6 +31,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { escenario, correr, startProxy, startVault, teardown } from './lib/harness.js'
 import * as atRest from '../../dotrino-vault/src/atrest.js'
+const { atRestFor } = atRest
 
 const VERBOSE = process.argv.includes('--verbose')
 const log = (m) => { if (VERBOSE) console.log(m) }
@@ -186,6 +187,33 @@ escenario('un cajón llamado `vault` NO le envuelve nada a la llave de comunicac
   log(`  cajones: ${Object.keys(cajones).join(', ')} · destinatarios: ${destinatarios.size}`)
   assert.ok(!destinatarios.has(comm.pub),
     'la llave de comunicación recibió una envoltura: con ella se leerían secretos con el perfil CERRADO')
+})
+
+/**
+ * LO QUE YA ESTABA ESCRITO también se sella. Cifrar solo lo nuevo deja el disco en claro
+ * durante meses: la bitácora de una bóveda que lleva un año andando no se reescribe sola.
+ */
+escenario('una bitácora vieja EN CLARO queda sellada al arrancar', async () => {
+  const pdir = path.join(vault.dir, 'p', fs.readdirSync(path.join(vault.dir, 'p'))[0])
+  const f = path.join(pdir, 'activity.log')
+
+  // Se le mete una línea como las de antes de 0.89: JSON pelado y el archivo 0664.
+  const vieja = JSON.stringify({ ts: Date.now(), op: 'enroll', device: 'AA00-BB11' })
+  fs.appendFileSync(f, vieja + '\n')
+  fs.chmodSync(f, 0o664)
+
+  // Y se reinicia la bóveda, que es cuando toca convertirla.
+  await vault.restart()
+
+  const lineas = fs.readFileSync(f, 'utf8').split('\n').filter(Boolean)
+  const enClaro = lineas.filter((l) => !l.startsWith(MAGIA))
+  assert.deepEqual(enClaro, [], 'quedaron líneas en claro: ' + enClaro.length)
+  assert.equal(fs.statSync(f).mode & 0o077, 0, 'y ya no la puede leer otro usuario')
+
+  // Y se sigue pudiendo leer: convertir no puede ser perder.
+  const atRest = atRestFor(pdir)
+  const abiertas = lineas.map((l) => JSON.parse(atRest.decrypt(l)))
+  assert.ok(abiertas.some((e) => e.device === 'AA00-BB11'), 'la línea vieja sigue ahí')
 })
 
 const ok = await correr()

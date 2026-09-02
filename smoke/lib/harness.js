@@ -86,14 +86,20 @@ export async function startProxy ({ log = () => {} } = {}) {
  */
 export async function startVault ({ proxyUrl, name = 'vault', log = () => {} } = {}) {
   const dir = tmpDir(name)
-  const child = track(spawn(process.execPath, ['bin/dotrino-vaultd.js'], {
-    cwd: VAULT_DIR,
-    env: { ...process.env, DOTRINO_VAULT_DIR: dir, PROXY_URL: proxyUrl },
-    stdio: ['ignore', 'pipe', 'pipe']
-  }), name)
   const lines = []
-  child.stdout.on('data', (b) => { lines.push(String(b)); log(`[${name}] ` + String(b).trim()) })
-  child.stderr.on('data', (b) => { lines.push(String(b)); log(`[${name}!] ` + String(b).trim()) })
+  // El proceso se guarda en una caja para poder REEMPLAZARLO: `restart()` levanta otro
+  // sobre los mismos datos, que es como se prueba lo que la bóveda hace AL ARRANCAR.
+  let child = null
+  const lanzar = () => {
+    child = track(spawn(process.execPath, ['bin/dotrino-vaultd.js'], {
+      cwd: VAULT_DIR,
+      env: { ...process.env, DOTRINO_VAULT_DIR: dir, PROXY_URL: proxyUrl },
+      stdio: ['ignore', 'pipe', 'pipe']
+    }), name)
+    child.stdout.on('data', (b) => { lines.push(String(b)); log(`[${name}] ` + String(b).trim()) })
+    child.stderr.on('data', (b) => { lines.push(String(b)); log(`[${name}!] ` + String(b).trim()) })
+  }
+  lanzar()
 
   const stateFile = path.join(dir, 'state.json')
   // EL CANAL LOCAL VA CIFRADO EN REPOSO (dotrino-vault `src/ipc.js`, desde 0.89): por él
@@ -116,6 +122,27 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {} } =
 
   return {
     dir, pid: child.pid, iss: state.iss, state,
+    /**
+     * Apaga la bóveda y levanta otra sobre los MISMOS datos. Es lo que hace falta para
+     * probar lo que solo pasa al arrancar (migraciones, por ejemplo). Espera a que el
+     * candado se suelte: dos bóvedas sobre un directorio no arrancan, y con razón.
+     */
+    async restart (timeoutMs = 25000) {
+      const viejo = child
+      try { viejo.kill('SIGTERM') } catch (_) {}
+      const t0 = Date.now() + 8000
+      while (Date.now() < t0 && viejo.exitCode == null && viejo.signalCode == null) await sleep(100)
+      try { viejo.kill('SIGKILL') } catch (_) {}
+      await sleep(600)
+      lanzar()
+      const t = Date.now() + timeoutMs
+      while (Date.now() < t) {
+        const s = readJson(stateFile)
+        if (s?.iss && s.pid === child.pid) return s
+        await sleep(200)
+      }
+      throw new Error(`la bóveda ${name} no volvió a arrancar:\n` + lines.join(''))
+    },
     /**
      * `dotrino-vault pair` → devuelve el QR. Con `service` es `pair --service <ns>`: el cert
      * sale limitado a `vault:secrets:<ns>` y en el acta entra como SERVICIO con ese CN.

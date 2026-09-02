@@ -69,7 +69,9 @@ async function levantarBoveda () {
   })
   await esperar(() => salida.some((l) => l.includes('servicio listo')), { que: 'que la bóveda arranque' })
     .catch(() => { throw new Error('la bóveda (binario) no arrancó:\n' + salida.join('\n')) })
-  return { estado: JSON.parse(boveda.leer('/data/vault/state.json')), salida }
+  // Sin `state.json`: desde 0.89 el canal local va cifrado con la clave de la CAJA, y
+  // nadie de aquí lo usaba — que la bóveda dijera «servicio listo» ya es el arranque.
+  return { salida }
 }
 
 const ctl = (cmd) => boveda.exec(`${BINARIO} --ctl ${cmd}`, { env: VAULT_ENV })

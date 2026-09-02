@@ -18,7 +18,8 @@
     "smoke:demonio": "node smoke/demonio.mjs",
     "prod:timbre": "node produccion/timbre.mjs",
     "type-check": "tsc --noEmit",
-    "smoke:dos-bovedas": "node smoke/dos-bovedas.mjs"
+    "smoke:dos-bovedas": "node smoke/dos-bovedas.mjs",
+    "smoke:reposo": "node smoke/reposo.mjs"
   },
   "devDependencies": {
     "@vitejs/plugin-basic-ssl": "2.3.0",

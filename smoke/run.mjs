@@ -49,14 +49,33 @@ async function dispositivo (vault, { label, onCode } = {}) {
   return { qr, deviceId, code, enrolled: p }
 }
 
-escenario('la bóveda arranca, tiene identidad y su propia acta con un solo miembro', async () => {
+/**
+ * NACE CON DOS MIEMBROS, y el segundo es ella misma.
+ *
+ * Este escenario decía «un solo miembro» y se quedó atrás: desde que la maestra tiene dos
+ * trabajos y ninguno más (dueño, 2026-08-31), quien habla por la red es la LLAVE DE
+ * COMUNICACIÓN, y esa llave entra en el acta como un miembro con `cn: 'vault'` y `sign` a
+ * secas. Por eso el acta recién nacida va por el sello #3: se estrena, se le añade `sealer`
+ * al dueño y se admite la llave.
+ *
+ * Que la llave esté aquí es lo que permite que la bóveda siga sirviendo con el perfil
+ * CERRADO; que solo tenga `sign` es lo que impide que eso sirva para leer nada.
+ */
+escenario('la bóveda arranca con su acta: el dueño y su propia llave de comunicación', async () => {
   assert.ok(vault.iss, 'la bóveda publica su identidad en state.json')
   const acta = vault.acta()
   assert.ok(acta, 'la bóveda nace con su acta')
-  assert.equal(acta.seq, 1)
-  assert.equal(acta.members.length, 1)
-  assert.equal(acta.sealer, acta.sealedBy, 'nace mandando ella misma')
-  assert.deepEqual([...acta.members[0].caps].sort(), ['read', 'sign', 'store'])
+  // «Manda ella misma» = la selló su propia llave de perfil. El campo `sealer` que se
+  // comparaba aquí no existe: se llama `profileId`, y llevaba tiempo dando `undefined`
+  // detrás de otra aserción que fallaba antes.
+  assert.equal(acta.profileId, acta.sealedBy, 'nace mandando ella misma')
+  assert.equal(acta.sealerChanged, false)
+
+  const dueno = acta.members.find((m) => !m.cn)
+  const comm = acta.members.find((m) => m.cn === 'vault')
+  assert.equal(acta.members.length, 2, 'el dueño y la llave de comunicación, nadie más')
+  assert.deepEqual([...dueno.caps].sort(), ['read', 'sealer', 'sign', 'store'])
+  assert.deepEqual(comm.caps, ['sign'], 'la llave de comunicación habla; no lee ni guarda')
 })
 
 escenario('emparejar: con el código correcto se emite el cert y el dispositivo entra en el acta', async () => {
@@ -71,7 +90,8 @@ escenario('emparejar: con el código correcto se emite el cert y el dispositivo 
   assert.ok((dump.issued || []).some((x) => x.sub === res.device.publickey), 'queda registrado')
 
   const acta = vault.acta()
-  assert.equal(acta.members.length, 2, 'aprobar es también admitir en el perfil')
+  // Tres: el dueño, la llave de comunicación de la bóveda y el celular que acaba de entrar.
+  assert.equal(acta.members.length, 3, 'aprobar es también admitir en el perfil')
   assert.ok(acta.members.some((m) => m.pub === res.device.publickey))
 })
 

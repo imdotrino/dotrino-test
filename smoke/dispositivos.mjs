@@ -62,7 +62,13 @@ async function levantarBoveda () {
   })
   await esperar(() => salida.some((l) => l.includes('servicio listo')), { que: 'que la bóveda arranque' })
     .catch(() => { throw new Error('la bóveda (binario) no arrancó:\n' + salida.join('\n')) })
-  const estado = JSON.parse(boveda.leer('/data/vault/state.json'))
+  // El estado se pregunta CON EL CLI, dentro de la caja. Desde 0.89 el canal local va
+  // cifrado en reposo y la clave sale de la máquina que escribió: la caja puede abrir su
+  // `state.json`, el anfitrión no. Preguntarlo por el CLI es además el camino de verdad.
+  const estado = { iss: null, version: null }
+  const st = boveda.exec(`${BINARIO} --ctl status`, { env: { DOTRINO_VAULT_DIR: '/data/vault' } }).stdout || ''
+  estado.version = (/versi[oó]n\s*:\s*(\S+)/i.exec(st) || [])[1] || null
+  estado.iss = (/fingerprint\s*:\s*(\S+)/i.exec(st) || [])[1] || null
   return { estado, salida }
 }
 

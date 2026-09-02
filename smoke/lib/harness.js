@@ -96,7 +96,12 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {} } =
   child.stderr.on('data', (b) => { lines.push(String(b)); log(`[${name}!] ` + String(b).trim()) })
 
   const stateFile = path.join(dir, 'state.json')
-  const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')) } catch { return null } }
+  // EL CANAL LOCAL VA CIFRADO EN REPOSO (dotrino-vault `src/ipc.js`, desde 0.89): por él
+  // pasan la contraseña del perfil y los valores, así que dejó de escribirse en claro. El
+  // harness es un cliente más de ese canal y usa el MISMO códec — si esto se quedara
+  // leyendo JSON pelado, todos los smokes se caerían sin que nada estuviera roto.
+  const canal = atRest.atRestFor(dir)
+  const readJson = (f) => { try { return JSON.parse(canal.decrypt(fs.readFileSync(f, 'utf8'))) } catch { return null } }
   const until = Date.now() + 20000
   let state = null
   while (Date.now() < until) {
@@ -106,7 +111,7 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {} } =
   }
   if (!state?.iss) throw new Error(`la bóveda ${name} no arrancó:\n` + lines.join(''))
 
-  const writeReq = (file, obj) => fs.writeFileSync(path.join(dir, file), JSON.stringify(obj), { mode: 0o600 })
+  const writeReq = (file, obj) => fs.writeFileSync(path.join(dir, file), canal.encrypt(JSON.stringify(obj)), { mode: 0o600 })
   const signal = (sig) => process.kill(child.pid, sig)
 
   return {

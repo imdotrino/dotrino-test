@@ -176,14 +176,44 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {} } =
       await sleep(600)
     },
     /**
-     * `dotrino-vault caps <ID> +permiso` — marca (o desmarca) un aparato como SUPERVISADO:
-     * a partir de ahí, cada vez que pida una llave privada hace falta que alguien lo
-     * apruebe. Es la propiedad del APARATO, no de la credencial (§2.0).
+     * ¿ESTE APARATO SE LLEVA LAS CLAVES PRIVADAS SOLO? Es el permiso `unattended` del acta.
+     *
+     * Está AL REVÉS de lo que había antes, y por eso no es un simple renombre: hasta 0.79.0
+     * era una marca local de «este pide permiso», así que un aparato nuevo nacía pudiendo
+     * llevárselas y nadie elegía eso. Ahora, SIN el permiso se pide aprobación —que es lo
+     * que hay que hacer cuando no se sabe— y llevárselas solo se concede a propósito.
+     *
+     * El `op: 'approval'` del daemon ya no existe; esto va por `caps`, como cualquier otro
+     * permiso, y por eso lo respeta cualquier bóveda de la cuenta.
      */
-    async approval (pub, on = true) {
-      writeReq('secret-request.json', { op: 'approval', pub, approval: !!on })
+    async unattended (pub, on = true) {
+      const acta = await this.members()
+      const m = (acta.members || []).find((x) => x.pub === pub)
+      const caps = new Set(m?.caps || [])
+      if (on) caps.add('unattended'); else caps.delete('unattended')
+      await this.caps(pub, [...caps])
+    },
+    /**
+     * Las operaciones de PERFIL del daemon: `password-set`, `lock`, `unlock`…
+     *
+     * Mismo camino que usa la CLI (`profile-request.json` + SIGUSR2), así que lo que se
+     * prueba es el del usuario y no un atajo. Hace falta para probar la bóveda CERRADA, que
+     * es su estado normal: el candado es justamente para vivir cerrada.
+     */
+    async profile (op, extra = {}, timeoutMs = 12000) {
+      // `profiles-list.json`, no `profiles.json`: el segundo es el REGISTRO de perfiles
+      // (cifrado en reposo) y el primero es donde el daemon deja su respuesta.
+      const f = path.join(dir, 'profiles-list.json')
+      const antes = readJson(f)?.at || 0
+      writeReq('profile-request.json', { op, ...extra })
       signal('SIGUSR2')
-      await sleep(600)
+      const t = Date.now() + timeoutMs
+      while (Date.now() < t) {
+        const d = readJson(f)
+        if (d?.at && d.at !== antes) return d
+        await sleep(120)
+      }
+      throw new Error(`el daemon no contestó a «${op}»`)
     },
     /** `dotrino-vault devices` → volcado de delegaciones. */
     async devices (timeoutMs = 8000) {

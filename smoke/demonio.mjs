@@ -195,17 +195,19 @@ escenario('guardar y leer lo público: sin preguntarle a nadie', async () => {
     'un dato público llega sin que nadie apruebe nada')
 })
 
-escenario('sin marcar el aparato, lo privado también llega: la aprobación es OPCIONAL', async () => {
-  // Es la política del vault, no un descuido: se pide una vez por aparato y solo si el
-  // dueño lo marcó. Un aparato de confianza no interrumpe a nadie.
+escenario('CON el permiso `unattended`, lo privado llega sin preguntar', async () => {
+  // El defecto se dio la vuelta en 0.79.0: SIN el permiso se pide aprobación. Que un
+  // aparato se lleve claves privadas solo es ahora una concesión explícita, no lo que pasa
+  // por omisión — antes nacía pudiendo y nadie elegía eso.
+  await vault.unattended(estado.extPub, true)
   const abierta = await pedir(estado.popup, 'get', { id: estado.id, keys: ['secret'] })
   assert.equal(abierta?.result?.secret, 'hunter2', 'la contraseña llega sin preguntar')
 })
 
-escenario('marcado el aparato, lo privado pasa por el APROBADOR', async () => {
+escenario('SIN el permiso, lo privado pasa por el APROBADOR', async () => {
   const { popup } = estado
 
-  await vault.approval(estado.extPub, true)
+  await vault.unattended(estado.extPub, false)
 
   // El aparato que aprueba mira su pantalla de PEDIDOS, que es otra ruta: `/vault` es para
   // administrar y `/approvals` es solo para decir sí o no.
@@ -348,7 +350,7 @@ escenario('la propia EXTENSIÓN puede ser el aparato que aprueba', async () => {
   const dos = (acta.members || []).find((m) => (m.label || '').includes('segundo'))
   assert.ok(dos, 'el segundo aparato está en el acta')
   await darPermiso(dos.pub, 'passwords')
-  await vault.approval(dos.pub, true)   // supervisado: lo suyo pasa por un aprobador
+  // Sin `unattended` lo suyo pasa por un aprobador, que es el defecto desde 0.79.0.
 
   // El mostrador ya estaba abierto, así que no vuelve a anunciarse: lo que cambia es la
   // lista de quién puede pedir, y esa la relee el daemon cada pocos segundos. Se insiste

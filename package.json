@@ -19,7 +19,8 @@
     "prod:timbre": "node produccion/timbre.mjs",
     "type-check": "tsc --noEmit",
     "smoke:dos-bovedas": "node smoke/dos-bovedas.mjs",
-    "smoke:reposo": "node smoke/reposo.mjs"
+    "smoke:reposo": "node smoke/reposo.mjs",
+    "smoke:replica": "node smoke/replica.mjs"
   },
   "devDependencies": {
     "@vitejs/plugin-basic-ssl": "2.3.0",

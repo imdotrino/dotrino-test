@@ -233,10 +233,25 @@ escenario('entrar en la bóveda trae TAMBIÉN las variables (Scopes no sale en b
   const p = await tui.esperar(/proxy/, 8000)
   assert.ok(!/sin scopes/.test(p), 'la variable está ahí sin tener que refrescar a mano')
   assert.match(p, /TURN_KEY_ID/, 'con su nombre')
-  // Y como es PÚBLICA, se ve su valor: pública quiere decir que ese valor puede salir de
-  // esta máquina, así que taparlo aquí —en la máquina donde vive, delante de su dueño— era
-  // lo único que la marca no significaba.
-  assert.match(p, /k-123/, 'y con su valor, por ser pública')
+
+  // EL VALOR NO SALE EN LA LISTA, y esto CAMBIÓ el 2026-09-02: desde que todas las
+  // variables van en sobre, «pública» dejó de significar «en claro» — dice a quién se le
+  // despacha sin aprobación, nada más. Ni siquiera hay un valor suelto que enseñar: habría
+  // que abrir cada sobre en cada refresco, y en un cajón con dueño la bóveda no puede.
+  //
+  // Este test afirmaba lo contrario y llevaba días en rojo por eso, arrastrando con él a
+  // los seis escenarios de abajo. Es el patrón de siempre: una aserción que sobrevive al
+  // cambio que la deroga y que nadie vuelve a leer.
+  assert.ok(!/k-123/.test(p), 'el valor NO se enseña en la lista: va en sobre como cualquiera')
+
+  // LO QUE SÍ: revelarla a demanda con «v», y sin pedir contraseña — que es exactamente lo
+  // que «pública» significa ahora.
+  // El cursor entra en el SCOPE, y «v» solo revela sobre una variable: hay que bajar a
+  // ella. No es un rodeo del test, es cómo se usa.
+  tui.teclas('\x1b[B')
+  tui.teclas('v')
+  const revelado = await tui.esperar(/k-123/, 8000)
+  assert.match(revelado, /k-123/, 'una pública se revela sin contraseña')
 })
 
 escenario('emparejar con P: sale el QR, el aparato se conecta y con el código entra al acta', async () => {

@@ -25,7 +25,7 @@ bilingüe es/en (§9) y `noindex` + `robots` en `Disallow: /` por ser interna (�
 npm run smoke                 # todo
 npm run smoke:dispositivos    # cada aparato en su contenedor, contra el binario
 npm run smoke:configuracion   # proxio ↔ bóveda, de caja negra
-npm run smoke:navegador       # con Playwright
+npm run smoke:navegador       # con Playwright (incluye el PERFIL EN SOBRES, de punta a punta)
 npm run smoke:consola
 npm run smoke:tui
 npm run smoke:interfaz

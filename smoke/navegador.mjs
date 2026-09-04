@@ -15,6 +15,7 @@
  */
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { escenario, correr, startProxy, startVault, teardown, servirEstatico, ROOT } from './lib/harness.js'
 
@@ -28,6 +29,7 @@ let proxy = null
 let vault = null
 let webConsola = null
 let webIframe = null
+let webApp = null
 let navegador = null
 let contexto = null
 
@@ -106,12 +108,15 @@ escenario('`/vault` decide sola: sin bóveda fuera, ESTE aparato es la bóveda y
   await page.waitForSelector('[data-testid="self-pair"]:not([disabled])', { timeout: 30000 })
   assert.match(await donde.innerText(), /escuchando|listening/i, 'y lo dice donde se ve')
 
-  // Y atiende las DOS cosas que se le piden a una bóveda: aparatos y contraseñas. El
-  // código para enlazar la extensión es lo que la extensión viene a buscar a esta
-  // dirección; cuando `/vault` era otra página, esto se quedó fuera al unirlas.
-  await page.waitForSelector('[data-testid="vault-code"]', { timeout: 30000 })
-  assert.ok((await page.locator('[data-testid="vault-code"]').innerText()).length > 20,
-    'el código para enlazar la extensión está a la vista')
+  // Y atiende las DOS cosas que se le piden a una bóveda: aparatos y contraseñas.
+  //
+  // Esto miraba un `vault-code`: un código para enlazar la extensión que la pestaña
+  // imprimía aparte. Se QUITÓ a propósito el 2026-08-27 —el gestor se empareja como
+  // cualquier aparato y su permiso vive en el acta, en vez de tener un segundo
+  // emparejamiento con su propia lista—, y la prueba se quedó esperando algo borrado.
+  // Lo que se comprueba ahora es lo que sí tiene que estar: que el mostrador de
+  // contraseñas está en marcha en esta misma página.
+  await page.waitForSelector('[data-testid="passwords-desk"] [data-testid="ring-on"], [data-testid="passwords-desk"] [data-testid="ring-enable"]', { timeout: 30000 })
   await page.close()
 })
 
@@ -206,10 +211,22 @@ escenario('el navegador se empareja con la bóveda: enseña el código y entra e
   ])
   await page.waitForSelector('[data-testid="members"] .member:nth-child(2)', { timeout: 30000 })
 
+  // QUIÉNES TIENEN QUE ESTAR, en vez de cuántos. Esto contaba 2 y se puso rojo cuando la
+  // bóveda estrenó su LLAVE DE COMUNICACIÓN (2026-08-31): desde que la maestra solo firma
+  // el acta y regenera sobres, hablar por la red es de otra llave, y esa entra en el acta
+  // como un miembro más con `cn:'vault'`. Un número no dice nada de eso; los papeles sí.
   const acta = vault.acta()
-  assert.equal(acta.members.length, 2, 'la bóveda lo admitió en su acta')
+  const quienes = acta.members.map((m) => ({ label: m.label, cn: m.cn, caps: m.caps }))
+  const detalle = ': ' + JSON.stringify(quienes)
+  assert.ok(quienes.some((m) => m.label === 'navegador' && m.caps?.includes('sign')),
+    'la bóveda admitió al navegador, y puede firmar por ti' + detalle)
+  assert.ok(quienes.some((m) => m.cn === 'vault'),
+    'y sigue estando la llave con la que la bóveda habla, que no es la maestra' + detalle)
+  assert.ok(quienes.some((m) => m.caps?.includes('sealer')),
+    'y quien sella el acta' + detalle)
+
   const enPantalla = await page.locator('[data-testid="members"] .member').count()
-  assert.equal(enPantalla, 2, 'y la consola ya muestra los dos')
+  assert.equal(enPantalla, acta.members.length, 'y la consola muestra a todos los del acta')
 
   // Y la página cambió de papel sola: ya hay bóveda fuera, así que este aparato deja de
   // hacer de mostrador y pasa a hablar con ella. Dos bóvedas para una cuenta no existen.
@@ -306,6 +323,198 @@ escenario('la llave del navegador NO es extraíble (solo se comprueba en un nave
 
 // ---------- arranque ----------
 
+/* ══════════════════════════════════════════════════════════════════════════════════════
+ * EL PERFIL EN SOBRES, de punta a punta (`dotrino-vault/docs/datos-del-perfil.md`).
+ *
+ * Es la prueba del síntoma que abrió todo esto: **«edito el perfil y no funciona»**. La
+ * causa era que el perfil se guardaba en claro, así que escribirlo exigía la bóveda
+ * ABIERTA — y la bóveda vive cerrada, que es para lo que está el candado.
+ *
+ * Aquí se comprueba lo que ningún test unitario puede: una app de verdad, en otro origen,
+ * hablando por el iframe de identidad con una bóveda CERRADA al otro lado del proxio.
+ * Cuatro cosas, y son las cuatro del diseño:
+ *
+ *   1. se escribe con la bóveda cerrada;
+ *   2. lo privado queda SELLADO —el valor no aparece en el disco de la bóveda—;
+ *   3. lo público queda EN CLARO, porque no hay a quién sellárselo;
+ *   4. y otro arranque lo reconstruye desde los sobres, sin copia local que le ayude.
+ * ══════════════════════════════════════════════════════════════════════════════════════ */
+
+/** Un valor que no se parece a nada más, para poder buscarlo en el disco sin falsos. */
+const TELEFONO = '0999' + Math.random().toString().slice(2, 8)
+const APODO = 'Perfil-' + Math.random().toString(36).slice(2, 8)
+
+/**
+ * Monta una app del ecosistema en un directorio aparte y devuelve su raíz.
+ *
+ * SE SIRVE DE VERDAD, no se inventa la respuesta con `page.route`. Una página sintética no
+ * tiene dirección de red, así que Chrome la trata como pública y le prohíbe pedirle nada a
+ * la red local: el iframe no cargaba y el error que se veía era «Vault did not respond»,
+ * que apunta al otro lado (`ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS`).
+ *
+ * Los enlaces simbólicos a `src/` y `vault/` son para que los `import` resuelvan igual que
+ * en una app instalada, sin copiar el repo ni dejar nada dentro de él.
+ */
+function prepararApp () {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dotrino-app-'))
+  fs.symlinkSync(path.join(ROOT, 'dotrino-identity/src'), path.join(dir, 'src'))
+  fs.symlinkSync(IFRAME, path.join(dir, 'vault'))
+  // El `<body>` explícito NO es cosmético: el cliente cuelga el iframe de `document.body`,
+  // y una página que es solo un `<script type=module>` lo ejecuta antes de que exista.
+  fs.writeFileSync(path.join(dir, 'index.html'), `<!doctype html><meta charset="utf-8">
+<title>app de prueba</title><body>
+<script type="module">
+  import { Identity } from '/src/index.js'
+  const id = new Identity({ vaultUrl: ${JSON.stringify(iframeUrl())}, timeoutMs: 30000 })
+  window.__lista = id.ready().then(() => { window.__id = id; return true })
+    .catch((e) => { window.__fallo = String(e?.message || e); return false })
+</script>`)
+  return dir
+}
+
+/** Abre esa app: otro origen, y la identidad por el iframe, como cualquier app real. */
+async function abrirApp () {
+  const page = await contexto.newPage()
+  page.on('console', (m) => log('[app] ' + m.text()))
+  page.on('pageerror', (e) => log('[app!] ' + e.message))
+  await page.goto(webApp.url + '/')
+  await page.waitForFunction(() => window.__lista, null, { timeout: 30000 })
+  const lista = await page.evaluate(() => window.__lista)
+  if (!lista) throw new Error('la app no pudo abrir la identidad: ' + await page.evaluate(() => window.__fallo))
+
+  // PONERSE EN LA CUENTA QUE ESTÁ ENLAZADA A LA BÓVEDA. Al emparejar, este navegador acaba
+  // con DOS cuentas (la suya de siempre y la de la bóveda, camino B), y la activa sigue
+  // siendo la primera. Sin esto el perfil se guardaba en la cuenta que no tiene bóveda
+  // detrás: el empujón decía que sí —porque a su bóveda, que es este mismo aparato, sí
+  // llegaba— y el cajón del daemon se quedaba vacío. Cambiar de cuenta NO es reactivo, así
+  // que después hay que recargar.
+  const cambio = await page.evaluate(async () => {
+    const ps = await window.__id.listProfiles()
+    const conBoveda = ps.find((p) => p.vault)
+    if (!conBoveda) return { ok: false, ps }
+    if (!conBoveda.current) await window.__id.switchProfile(conBoveda.id)
+    return { ok: true, recargar: !conBoveda.current }
+  })
+  if (!cambio.ok) throw new Error('ninguna cuenta de este navegador está enlazada a la bóveda: ' + JSON.stringify(cambio.ps))
+  if (cambio.recargar) {
+    await page.reload()
+    await page.waitForFunction(() => window.__lista, null, { timeout: 30000 })
+    await page.evaluate(() => window.__lista)
+  }
+  return page
+}
+
+/**
+ * Espera a que el empujón del perfil haya llegado de verdad, y explota diciendo por qué.
+ *
+ * `at > 0` NO es un detalle: «todavía no se ha empujado nada» tiene que contar como no
+ * llegado. Mientras el estado inicial fue `{ ok: true }`, esta espera pasaba sin que la
+ * bóveda hubiera recibido una sola cosa.
+ *
+ * Y se pregunta DESDE NODE, no con `waitForFunction`: ese awaita el predicado, pero uno
+ * `async` le devuelve una promesa —siempre cierta— y la espera terminaba en el primer
+ * intento sin haber mirado nada. Costó una vuelta entera: los escenarios de después
+ * fallaban buscando en el disco un cajón que aún no se había escrito.
+ */
+async function esperarEmpujon (page, ms = 30000) {
+  const hasta = Date.now() + ms
+  let ultimo = null
+  while (Date.now() < hasta) {
+    ultimo = await page.evaluate(() => window.__id.profilePushState())
+    if (ultimo?.error) throw new Error('el empujón falló: ' + ultimo.error)
+    if (ultimo?.ok === true && ultimo.at > 0) return ultimo
+    await new Promise((r) => setTimeout(r, 250))
+  }
+  throw new Error('el perfil no llegó a la bóveda: ' + JSON.stringify(ultimo))
+}
+
+escenario('con la bóveda CERRADA, la app escribe el perfil (que era el síntoma)', async () => {
+  // La bóveda con candado y cerrada: su estado normal, y el que antes lo impedía.
+  await vault.profile('password-set', { password: 'una-contraseña-de-prueba' })
+  await vault.profile('lock')
+
+  const page = await abrirApp()
+  const r = await page.evaluate(async ([apodo, telefono]) => {
+    try { return { ok: !!(await window.__id.updateMe({ nickname: apodo, telefono })) } }
+    catch (e) { return { ok: false, error: String(e?.message || e) } }
+  }, [APODO, TELEFONO])
+  assert.ok(r.ok, 'la app pudo editar el perfil: ' + (r.error || ''))
+
+  await esperarEmpujon(page)
+  const diag = await page.evaluate(async () => ({
+    perfil: await window.__id.currentProfile(),
+    soy: await window.__id.myMembership(),
+    empujon: await window.__id.profilePushState()
+  }))
+  console.log('DIAG ' + JSON.stringify(diag))
+  await page.close()
+})
+
+escenario('lo PRIVADO queda sellado: el teléfono no está en el disco de la bóveda', async () => {
+  const store = vault.secretos()
+  const bag = store?.ns?.['@me']
+  assert.ok(bag?.vars, 'la bóveda tiene el cajón del perfil. Lo que hay: ' +
+    JSON.stringify({ ns: Object.keys(store?.ns || {}), dev: Object.keys(store?.dev || {}), v: store?.schemaVersion }))
+
+  const tel = bag.vars.telefono
+  assert.ok(tel, 'guardó el teléfono')
+  assert.notEqual(tel.cls, 'public', 'el teléfono NO es público: es sensible y nadie lo marcó visible')
+  assert.equal(tel.pub, false, 'y está marcado como no público')
+  // El texto cifrado va en `e`, que es el sobre entero (`{gen, iv, ct}`) — el mismo que
+  // lleva una variable de servicio. Un `ct` suelto arriba sería otra forma, y no la hay.
+  assert.ok(tel.e?.ct && tel.e?.iv, 'y va dentro de un sobre: ' + JSON.stringify(tel).slice(0, 300))
+  assert.ok(tel.seal?.sig, 'firmado por la bóveda que lo guardó')
+
+  // LA COMPROBACIÓN QUE IMPORTA, y por eso se hace contra el archivo entero y en crudo:
+  // que el número no aparezca por ningún lado. Mirar solo su entrada dejaría pasar una
+  // copia en el histórico o en un índice.
+  assert.ok(!vault.secretosCrudos().includes(TELEFONO),
+    'el teléfono no aparece en claro en ninguna parte del cajón')
+})
+
+escenario('lo PÚBLICO queda en claro, porque no hay a quién sellárselo', async () => {
+  const bag = vault.secretos()?.ns?.['@me']
+  const nick = bag?.vars?.nickname
+  assert.ok(nick, 'guardó el apodo')
+  assert.equal(nick.cls, 'public', 'el apodo es público')
+  assert.equal(nick.pubv, APODO, 'y está en claro: es lo que ve quien pregunta sin tener ninguna llave tuya')
+  assert.ok(nick.seal, 'firmado, para que nadie lo invente en tu nombre')
+  assert.ok(!nick.ct, 'y sin sobre: sellarlo sería contradecir lo que significa público')
+})
+
+escenario('otro arranque lo reconstruye desde los sobres, sin copia local', async () => {
+  // SE BORRA LA COPIA LOCAL. Sin esto la app leería lo suyo y el test pasaría sin que la
+  // bóveda hubiera devuelto nada — que es precisamente el fallo que no queremos que pase
+  // desapercibido.
+  const limpia = await contexto.newPage()
+  await limpia.goto(webIframe.url + '/')
+  const borradas = await limpia.evaluate(() => {
+    // La clave lleva el PERFIL dentro (`dotrino.identity.p.<id>.me`), porque el almacén
+    // está acotado por cuenta desde el multi-perfil. Buscar «identity.me» no encontraba
+    // nada y el borrado no borraba: el escenario pasaba leyendo la copia local.
+    const fuera = Object.keys(localStorage).filter((k) => /^dotrino\.identity\..*\.me$/.test(k) || k === 'dotrino.identity.me')
+    for (const k of fuera) localStorage.removeItem(k)
+    return fuera.length
+  })
+  await limpia.close()
+  assert.ok(borradas > 0, 'había una copia local del perfil, y se quitó')
+
+  // Se pregunta DESDE NODE, por lo mismo que `esperarEmpujon`: `waitForFunction` con un
+  // predicado `async` recibe una promesa y la da por buena en el primer intento.
+  const page = await abrirApp()
+  let me = null
+  for (const hasta = Date.now() + 30000; Date.now() < hasta;) {
+    me = await page.evaluate(() => window.__id.getMe())
+    if (me?.nickname) break
+    await new Promise((r) => setTimeout(r, 250))
+  }
+  await page.close()
+  assert.ok(me, 'la app reconstruyó un perfil')
+
+  assert.equal(me.nickname, APODO, 'el apodo volvió: se leyó el dato público')
+  assert.equal(me.telefono, TELEFONO, 'y el teléfono también: se abrió el sobre con la envoltura de este aparato')
+})
+
 console.log('\nSMOKE · el navegador de verdad (Playwright), todo en local\n')
 if (!fs.existsSync(path.join(CONSOLA, 'index.html'))) {
   console.error('Falta el build de la consola. Hazlo con:  cd dotrino-vault/web && npm run build\n')
@@ -317,6 +526,7 @@ try {
   vault = await startVault({ proxyUrl: proxy.url, name: 'boveda', log })
   webConsola = await servirEstatico(CONSOLA, { spa: true })
   webIframe = await servirEstatico(IFRAME)
+  webApp = await servirEstatico(prepararApp())
   console.log(`  proxy    ${proxy.url}`)
   console.log(`  consola  ${webConsola.url}/vault`)
   console.log(`  identidad ${webIframe.url}  (el iframe, en otro origen)\n`)

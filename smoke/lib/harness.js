@@ -272,6 +272,28 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {} } =
       const key = Object.keys(id || {}).find((k) => k.endsWith('.acta'))
       return key ? JSON.parse(id[key]) : null
     },
+    /**
+     * EL CAJÓN DE SECRETOS TAL CUAL ESTÁ EN EL DISCO, sin pasar por la bóveda.
+     *
+     * Es la única forma de comprobar que un dato privado **no está en claro**: preguntarle
+     * a la bóveda te devuelve lo que ella decide enseñar, y aquí lo que hace falta ver es
+     * lo que quedaría si alguien se llevara el disco. Va cifrado en reposo y atado a esta
+     * máquina, así que se abre con el mismo módulo del vault — que es exactamente lo que
+     * puede hacer quien esté sentado aquí, y nadie más.
+     */
+    secretos () {
+      const pdir = path.join(dir, 'p', fs.readdirSync(path.join(dir, 'p'))[0])
+      const f = path.join(pdir, 'secrets.json')
+      if (!fs.existsSync(f)) return null
+      const raw = fs.readFileSync(f, 'utf8')
+      return JSON.parse(atRest.isEncrypted(raw) ? atRest.decryptText(raw, atRest.machineKey(pdir)) : raw)
+    },
+    /** El archivo del cajón EN CRUDO (cifrado). Para buscar si un valor se coló tal cual. */
+    secretosCrudos () {
+      const pdir = path.join(dir, 'p', fs.readdirSync(path.join(dir, 'p'))[0])
+      const f = path.join(pdir, 'secrets.json')
+      return fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : ''
+    },
     log: () => lines.join('')
   }
 }

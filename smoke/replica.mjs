@@ -25,7 +25,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { escenario, correr, startProxy, teardown } from './lib/harness.js'
 import { crearCaja, destruirCajas } from './lib/caja.js'
+import { WebSocketProxyClient } from '@dotrino/proxy-client'
+import { makeDeviceKey, signWithDevice } from '@dotrino/identity/capabilities'
 import { enrollService, fetchSecrets, readServiceIdentity } from '../../dotrino-vault/lib/src/service.js'
+import { makeEphemeralKey, openSealed } from '../../dotrino-vault/lib/src/sealed.js'
+import { MSG } from '../../dotrino-vault/lib/src/protocol.js'
 import { atRestFor } from '../../dotrino-vault/lib/src/atrest.js'
 import { parseInvite } from '../../dotrino-vault/lib/src/invite.js'
 
@@ -125,7 +129,7 @@ escenario('un servicio la lee de la BÓVEDA, y con eso conoce la cuenta', async 
 escenario('el replicador entra en la cuenta, y entra SIN llave de cifrado', async () => {
   R = caja('replicador', { DOTRINO_REPLICA_DIR: '/data/replica' })
 
-  const lineas = B.lanzar(`${BINARIO} --ctl pair --scope replica --label replicador --quiet`)
+  const lineas = B.lanzar(`${BINARIO} --ctl pair --scope replica --name replicador --quiet`)
   const inv = await esperar(() => {
     for (const l of lineas) { const o = parseInvite(l); if (o?.sn) return o }
     return null
@@ -186,6 +190,56 @@ escenario('con la bóveda APAGADA, el servicio sigue recibiendo su clave', async
     .catch((e) => { log('[test] el replicador contestó pero no valió: ' + e.message); return null }),
   { que: 'que el replicador conteste', timeoutMs: 45000 })
   assert.equal(s.API_KEY, VALOR, 'la clave llega igual, y el replicador no puede abrirla')
+})
+
+/**
+ * UN DESCONOCIDO PIDIENDO EL CAJÓN. Es la contraparte del escenario siguiente y hay que
+ * tener las dos, porque prueban cosas distintas en lados distintos:
+ *
+ *   · el siguiente prueba que NUESTRO cliente no le cree a un replicador sin pin;
+ *   · este prueba que el REPLICADOR no le contesta a quien no debe.
+ *
+ * Lo primero no protege de nadie: un atacante no corre nuestro cliente. La petición ya
+ * viaja firmada y con papel desde `fetchSecrets`, así que comprobarlos no cuesta un
+ * mensaje nuevo — solo mirarlos.
+ *
+ * El intruso no tiene nada: llave recién hecha, ningún papel, nunca estuvo en el acta.
+ * Solo sabe a quién preguntar y por qué cajón, que es lo que se aprende mirando.
+ */
+escenario('a un DESCONOCIDO el replicador no le da ni el cajón ni el acta', async () => {
+  const link = readServiceIdentity(dirServicio)
+  const replicaPub = (link.replicas || [])[0]
+  assert.ok(replicaPub, 'el servicio tiene que conocer al replicador para que esto pruebe algo')
+
+  const intruso = await makeDeviceKey()
+  const eph = await makeEphemeralKey()
+  const cli = new WebSocketProxyClient({ url: proxy.url })
+  await cli.connect()
+  const ident = { op: 'identify', publickey: intruso.publickey, token: cli.token, ts: Date.now() }
+  await cli.identify({ data: ident, signature: (await signWithDevice({ privateJwk: intruso.privateJwk, data: ident })).signature })
+
+  const respuesta = new Promise((resolve) => {
+    cli.on('message', (_from, p) => { if (p?.type === MSG.SECRETS_RESULT || p?.type === MSG.ERROR) resolve(p) })
+    setTimeout(() => resolve(null), 8000)
+  })
+  // NI FIRMA NI PAPEL: exactamente lo que un extraño puede mandar.
+  cli.sendByPubkey(replicaPub, {
+    type: MSG.SECRETS,
+    data: { op: 'secrets', ns: NS, ek: eph.ek, publickey: link.device.publickey, ts: Date.now() }
+  })
+  const p = await respuesta
+  try { cli.close() } catch (_) {}
+
+  assert.ok(p, 'el replicador ni siquiera contestó, lo cual también vale')
+  assert.notEqual(p.type, MSG.SECRETS_RESULT,
+    'el replicador le entregó el cajón a alguien que no firmó nada')
+
+  // Y lo que iba DENTRO, que es lo que de verdad se escapaba: el acta es el inventario de
+  // aparatos del dueño, y la bóveda no se lo enseña ni a un servicio de la casa.
+  if (p.type === MSG.SECRETS_RESULT) {
+    const dentro = await openSealed({ privateKey: eph.privateKey, enc: p.body?.enc })
+    assert.fail('además le entregó el acta con ' + (dentro?.acta?.members || []).length + ' aparatos')
+  }
 })
 
 /**

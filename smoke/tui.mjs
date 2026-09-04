@@ -133,7 +133,14 @@ async function abrirEmparejamiento () {
   const t0 = Date.now()
   tui.teclas('p')
   await tui.esperar(/A qué cuenta|Cuenta nueva|Esta bóveda/i)
+  await tui.esperar(/Entrar a esta cuenta/i)
   tui.teclas('\r') // «esta bóveda»
+  // Y AHORA PIDE EL NOMBRE DEL APARATO. No es un fallo: es el paso que llegó con `--name`
+  // («cómo se llamará el aparato que entre»), y este test es anterior — se quedaba
+  // esperando el QR delante de un campo de texto que nadie rellenaba, y de ahí colgaban
+  // los cuatro escenarios siguientes.
+  await tui.esperar(/se va a llamar|going to be called/i)
+  tui.teclas('tui\r')
   await tui.esperar(/Cuenta que se comparte/)
   // Al final de esa pantalla, debajo del QR, es donde se avisa de quién se conectó. El QR
   // ocupa más que el terminal, así que se baja del todo — lo mismo que hace el dueño.

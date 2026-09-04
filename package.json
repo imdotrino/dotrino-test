@@ -21,7 +21,8 @@
     "smoke:dos-bovedas": "node smoke/dos-bovedas.mjs",
     "smoke:reposo": "node smoke/reposo.mjs",
     "smoke:replica": "node smoke/replica.mjs",
-    "smoke:directo": "node smoke/directo.mjs"
+    "smoke:directo": "node smoke/directo.mjs",
+    "smoke:abrir": "node smoke/abrir-a-distancia.mjs"
   },
   "devDependencies": {
     "@vitejs/plugin-basic-ssl": "2.3.0",

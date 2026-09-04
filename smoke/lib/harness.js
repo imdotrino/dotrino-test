@@ -171,6 +171,25 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {} } =
     },
     /** `dotrino-vault approve <código>`. */
     approve (code) { writeReq('approve-request.json', { code: String(code) }); signal('SIGUSR2') },
+    /**
+     * Una operación de PERFIL, por el mismo canal que usa la CLI (`profile-request.json`).
+     * Es lo que deja poner una contraseña sin un terminal de por medio: la CLI la pide con
+     * un prompt, pero lo que llega al daemon es esto.
+     */
+    async profileOp (op, extra = {}, timeoutMs = 15000) {
+      const salida = path.join(dir, 'profiles-list.json')
+      try { fs.rmSync(salida, { force: true }) } catch (_) {}
+      writeReq('profile-request.json', { op, ...extra })
+      signal('SIGUSR2')
+      const t = Date.now() + timeoutMs
+      while (Date.now() < t) {
+        const d = readJson(salida)
+        if (d?.at) return d
+        await sleep(120)
+      }
+      throw new Error(`la bóveda no contestó a la operación de perfil «${op}»`)
+    },
+
     /** `dotrino-vault reject <deviceId>`. */
     reject (deviceId) { writeReq('reject-request.json', { deviceId }); signal('SIGUSR2') },
     /** `dotrino-vault revoke <nonce>` — retira UN certificado (el aparato sigue en el acta). */

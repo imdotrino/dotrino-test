@@ -27,12 +27,12 @@
   "devDependencies": {
     "@vitejs/plugin-basic-ssl": "2.3.0",
     "playwright": "1.62.0",
-    "vite": "7.3.1",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "vite": "7.3.1"
   },
   "dependencies": {
     "@dotrino/identity": "0.62.0",
     "@dotrino/reputation": "0.9.0",
-    "@dotrino/topbar": "0.9.0"
+    "@dotrino/topbar": "0.9.1"
   }
 }

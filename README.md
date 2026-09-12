@@ -29,6 +29,7 @@ npm run smoke:navegador       # con Playwright (incluye el PERFIL EN SOBRES, de 
 npm run smoke:consola
 npm run smoke:tui
 npm run smoke:interfaz
+npm run smoke:sellado         # dos desconocidos se sellan (llave averiguada, no emparejada)
 ```
 
 Cada uno arranca lo que necesita y lo apaga al terminar.

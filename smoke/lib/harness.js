@@ -307,6 +307,14 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {} } =
       const raw = fs.readFileSync(f, 'utf8')
       return JSON.parse(atRest.isEncrypted(raw) ? atRest.decryptText(raw, atRest.machineKey(pdir)) : raw)
     },
+    /** Los hilos del almacén de la bóveda (`threads.json`, cifrado en reposo), ya abiertos. */
+    hilos () {
+      const pdir = path.join(dir, 'p', fs.readdirSync(path.join(dir, 'p'))[0])
+      const f = path.join(pdir, 'threads.json')
+      if (!fs.existsSync(f)) return null
+      const raw = fs.readFileSync(f, 'utf8')
+      return JSON.parse(atRest.isEncrypted(raw) ? atRest.decryptText(raw, atRest.machineKey(pdir)) : raw)
+    },
     /** El archivo del cajón EN CRUDO (cifrado). Para buscar si un valor se coló tal cual. */
     secretosCrudos () {
       const pdir = path.join(dir, 'p', fs.readdirSync(path.join(dir, 'p'))[0])

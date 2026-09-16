@@ -24,12 +24,14 @@ const log = (m) => { if (VERBOSE) console.log(m) }
 
 const CONSOLA = path.join(ROOT, 'dotrino-vault/web/dist')
 const IFRAME = path.join(ROOT, 'dotrino-identity/vault')
+const ALMACEN = path.join(ROOT, 'dotrino-store')
 
 let proxy = null
 let vault = null
 let webConsola = null
 let webIframe = null
 let webApp = null
+let webAlmacen = null
 let navegador = null
 let contexto = null
 
@@ -359,6 +361,9 @@ function prepararApp () {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dotrino-app-'))
   fs.symlinkSync(path.join(ROOT, 'dotrino-identity/src'), path.join(dir, 'src'))
   fs.symlinkSync(IFRAME, path.join(dir, 'vault'))
+  // El cliente del almacén importa `../store/core.js`: los dos, como en el paquete publicado.
+  fs.symlinkSync(path.join(ALMACEN, 'src'), path.join(dir, 'store-client'))
+  fs.symlinkSync(path.join(ALMACEN, 'store'), path.join(dir, 'store'))
   // El `<body>` explícito NO es cosmético: el cliente cuelga el iframe de `document.body`,
   // y una página que es solo un `<script type=module>` lo ejecuta antes de que exista.
   fs.writeFileSync(path.join(dir, 'index.html'), `<!doctype html><meta charset="utf-8">
@@ -515,6 +520,73 @@ escenario('otro arranque lo reconstruye desde los sobres, sin copia local', asyn
   assert.equal(me.telefono, TELEFONO, 'y el teléfono también: se abrió el sobre con la envoltura de este aparato')
 })
 
+/* ══════════════════════════════════════════════════════════════════════════════════════
+ * EL ALMACÉN RESPALDADO EN LA BÓVEDA (`@dotrino/store` ≥ 0.11), de punta a punta.
+ *
+ * Hasta 0.10.0 el almacén mandaba TODO en un mensaje y el proxio corta en 1 MB: pasado ese
+ * tamaño el respaldo dejaba de llegar y nadie se enteraba. Aquí va de verdad lo que lo
+ * rompía: 1,6 MB de facturas desde una app en otro origen, por el iframe de identidad
+ * (que cifra), el proxio (que corta) y la bóveda (que guarda), más un borrado. Y después
+ * un navegador sin copia local que tiene que recuperarlo todo — sin el borrado.
+ * ══════════════════════════════════════════════════════════════════════════════════════ */
+
+const HILO = 'smoke.facturas'
+
+/** Conecta el almacén en la app, con la identidad enlazada a la bóveda, y corre `fn` dentro. */
+async function conAlmacen (page, fn, arg) {
+  return page.evaluate(async ([storeUrl, fnText, a]) => {
+    const { Store } = await import('/store-client/index.js')
+    const store = await Store.connect({ storeUrl, identity: window.__id, maxPerThread: 50000, connectTimeoutMs: 30000, timeoutMs: 30000 })
+    // eslint-disable-next-line no-new-func
+    return new Function('store', 'arg', `return (${fnText})(store, arg)`)(store, a)
+  }, [webAlmacen.url + '/', fn.toString(), arg])
+}
+
+escenario('el almacén sube 1,6 MB a la bóveda en tandas, con el borrado incluido', async () => {
+  const page = await abrirApp()
+  const r = await conAlmacen(page, async (store, hilo) => {
+    const xml = 'x'.repeat(11000)   // lo que ocupa una factura de facturero
+    await store.importThreads({ [hilo]: Array.from({ length: 150 }, (_, i) => ({ id: 'f' + i, ts: i + 1, xml })) })
+    await store.removeMessage(hilo, 'f0')
+    try { return { ok: true, estado: await store.vaultSync() } }
+    catch (e) { return { ok: false, code: e.code, message: e.message, estado: store.vault } }
+  }, HILO)
+  await page.close()
+  assert.ok(r.ok, 'la sincronización terminó: ' + JSON.stringify(r))
+  assert.equal(r.estado.pending, 0, 'sin nada pendiente')
+
+  const hilos = vault.hilos()
+  assert.equal(hilos?.threads?.[HILO]?.length, 149, 'la bóveda tiene las 149 facturas que quedan')
+  assert.ok(hilos.tombs?.[HILO]?.f0, 'y la lápida de la borrada, para que no vuelva desde otro aparato')
+  assert.ok(!hilos.threads[HILO].some((e) => e.id === 'f0'), 'la borrada no está')
+})
+
+escenario('un navegador sin copia local lo recupera de la bóveda, sin lo borrado', async () => {
+  // Desde una ruta del MISMO origen que no es la página del almacén: esa abre la base al
+  // cargar, y borrarla desde ahí queda bloqueado por ella misma.
+  const limpia = await contexto.newPage()
+  await limpia.goto(webAlmacen.url + '/limpiar')
+  const borrada = await limpia.evaluate(() => new Promise((resolve) => {
+    const q = indexedDB.deleteDatabase('cc-store')
+    q.onsuccess = () => resolve('ok'); q.onerror = () => resolve('error'); q.onblocked = () => resolve('blocked')
+  }))
+  await limpia.close()
+  assert.equal(borrada, 'ok', 'se borró la copia local del almacén')
+
+  const page = await abrirApp()
+  const r = await conAlmacen(page, async (store, hilo) => {
+    const antes = (await store.listThread(hilo)).length
+    try { await store.vaultSync() } catch (e) { return { ok: false, code: e.code, message: e.message } }
+    const ids = (await store.listThread(hilo)).map((e) => e.id)
+    return { ok: true, antes, total: ids.length, tieneF0: ids.includes('f0'), estado: store.vault }
+  }, HILO)
+  await page.close()
+  assert.ok(r.ok, 'se sincronizó: ' + JSON.stringify(r))
+  assert.equal(r.antes, 0, 'de verdad no había copia local')
+  assert.equal(r.total, 149, 'bajaron las 149, por partes')
+  assert.equal(r.tieneF0, false, 'y la borrada no resucitó')
+})
+
 console.log('\nSMOKE · el navegador de verdad (Playwright), todo en local\n')
 if (!fs.existsSync(path.join(CONSOLA, 'index.html'))) {
   console.error('Falta el build de la consola. Hazlo con:  cd dotrino-vault/web && npm run build\n')
@@ -527,6 +599,7 @@ try {
   webConsola = await servirEstatico(CONSOLA, { spa: true })
   webIframe = await servirEstatico(IFRAME)
   webApp = await servirEstatico(prepararApp())
+  webAlmacen = await servirEstatico(path.join(ALMACEN, 'store'))
   console.log(`  proxy    ${proxy.url}`)
   console.log(`  consola  ${webConsola.url}/vault`)
   console.log(`  identidad ${webIframe.url}  (el iframe, en otro origen)\n`)

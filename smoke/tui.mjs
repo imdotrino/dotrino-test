@@ -31,7 +31,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 // El cliente REAL de dispositivo: el aparato que se empareja no es una imitación.
 const { enroll, requestSign, verifyRevoke } = await import(path.join(ROOT, 'dotrino-vault/src/client.js'))
 const { MSG } = await import(path.join(ROOT, 'dotrino-vault/lib/src/protocol.js'))
-const { signWithDevice } = await import(path.join(ROOT, 'dotrino-identity/vault/capabilities.js'))
+const { signWithDevice, pubkeyId } = await import(path.join(ROOT, 'dotrino-identity/vault/capabilities.js'))
 const { WebSocketProxyClient } = await import(path.join(ROOT, 'dotrino-proxy-client/src/index.js'))
 
 let proxy = null
@@ -283,8 +283,11 @@ escenario('emparejar con P: sale el QR, el aparato se conecta y con el código e
 
   // Y LA PANTALLA LO ENSEÑA, sin tener que refrescar a mano: la lista sale del acta, y
   // aprobar solo guardaba los certificados — el aparato recién entrado no aparecía.
-  const lista = await tui.esperar(/celular/, 8000)
-  assert.match(lista, /[0-9A-F]{4}-[0-9A-F]{4}/, 'con su identificador legible')
+  // Se busca por su IDENTIFICADOR y no por la etiqueta: la que se ve es la que se tecleó en
+  // la bóveda al abrir el emparejamiento («tui»), que manda sobre la que trae el aparato.
+  const hex = (await pubkeyId(primero.pub)).slice(0, 8).toUpperCase()
+  const idLegible = hex.slice(0, 4) + '-' + hex.slice(4)
+  await tui.esperar(new RegExp(idLegible), 8000)
 })
 
 escenario('un SERVICIO se empareja desde la TUI, y entra al acta con su cn', async () => {
@@ -356,22 +359,33 @@ escenario('permisos con C: administrar se PREGUNTA antes, y queda en el acta', a
   assert.ok(!(miembroDe(primero.pub).caps || []).includes('admin'), 'nace sin administrar')
 
   await aDispositivos()
-  tui.teclas('\x1b[B') // ↓ : el master es la primera fila; el aparato, la siguiente
+  // LA FILA DEL APARATO SE BUSCA, no se supone. La lista sale del acta en su orden, y
+  // «la segunda» dejó de ser el aparato cuando la llave de comunicación de la bóveda entró
+  // como miembro: es un servicio, sus permisos empiezan por su cajón, y bajar tres filas
+  // marcaba «lee» en vez de «administra».
+  const fila = miembros().findIndex((m) => m.pub === primero.pub)
+  assert.ok(fila >= 0, 'el aparato está en el acta')
+  tui.teclas('\x1b[H' + '\x1b[B'.repeat(fila))
   await sleep(300)
   tui.teclas('c')
   const p = await tui.esperar(/Permisos de/)
-  for (const texto of [/Firmar como tú/, /Guardar tus datos/, /Leer tus datos/, /Administrar el perfil/]) {
-    assert.match(p, texto, 'los cuatro permisos, en cristiano')
+  // El título de cada permiso es SU NOMBRE en la CLI (`caps <ID> +administra`), y lo que hace
+  // va debajo. Antes eran frases («Firmar como tú»…), y esta prueba se quedó con ellas.
+  for (const texto of [/\bfirma\b/, /\bguarda\b/, /\blee\b/, /\badministra\b/]) {
+    assert.match(p, texto, 'los cuatro permisos, con el nombre que se teclea en la CLI')
   }
 
-  // Bajar hasta «Administrar el perfil» (el cuarto) y marcarlo.
+  // Bajar hasta «administra» (el cuarto) y marcarlo. Enter solo mueve el BORRADOR: se firma
+  // con G, una sola acta con todo lo tocado.
   tui.teclas('\x1b[B\x1b[B\x1b[B')
   await sleep(300)
   tui.teclas('\r')
-  // Es el único que se pregunta: deja a ese aparato meter y sacar dispositivos sin venir.
+  await sleep(300)
+  tui.teclas('g')
+  // Es el único que se pregunta, y al GUARDAR: deja a ese aparato meter y sacar dispositivos sin venir.
   await tui.esperar(/conecte y quite dispositivos/)
   tui.teclas('y')
-  await tui.esperar(/Concedido/)
+  await tui.esperar(/guardados/)
 
   const hasta = Date.now() + 8000
   while (Date.now() < hasta && !(miembroDe(primero.pub).caps || []).includes('admin')) await sleep(200)
@@ -379,7 +393,9 @@ escenario('permisos con C: administrar se PREGUNTA antes, y queda en el acta', a
 
   // Y quitarlo no se pregunta: quitar un permiso no expone nada.
   tui.teclas('\r')
-  await tui.esperar(/Quitado/)
+  await sleep(300)
+  tui.teclas('g')
+  await tui.esperar(/guardados/)
   const hasta2 = Date.now() + 8000
   while (Date.now() < hasta2 && (miembroDe(primero.pub).caps || []).includes('admin')) await sleep(200)
   assert.ok(!(miembroDe(primero.pub).caps || []).includes('admin'), 'y también lo recoge al quitarlo')

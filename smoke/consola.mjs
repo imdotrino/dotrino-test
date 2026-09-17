@@ -106,7 +106,9 @@ const GUION_ENROLAR = `
   import { enroll } from '/eco/dotrino-vault/src/client.js'
   const qr = JSON.parse(process.env.QR)
   const r = await enroll({ qr, label: process.env.ETIQUETA, dir: '/data/dev', onChallenge: (c) => console.log('CODE:' + c.code) })
-  fs.writeFileSync('/data/dev.json', JSON.stringify({ device: r.device, cert: r.cert, iss: r.iss }))
+  // El ACTA también: trae la clave de contenido envuelta para este aparato, y el almacén de
+  // la bóveda solo entra cifrado con ella.
+  fs.writeFileSync('/data/dev.json', JSON.stringify({ device: r.device, cert: r.cert, iss: r.iss, acta: r.acta }))
   console.log('OK:' + JSON.stringify({ pub: r.device.publickey, scope: r.cert.scope }))
 `
 
@@ -266,10 +268,10 @@ const GUION_REVOCADO = `
 const GUION_SECRETO = `
   import fs from 'node:fs'
   import { requestStore } from '/eco/dotrino-vault/src/client.js'
-  const { device, cert, iss } = JSON.parse(fs.readFileSync('/data/dev.json', 'utf8'))
+  const { device, cert, iss, acta } = JSON.parse(fs.readFileSync('/data/dev.json', 'utf8'))
   const args = JSON.parse(process.env.ARGS || '{}')
   try {
-    const r = await requestStore({ masterPubkey: iss, proxyUrl: process.env.PROXY, device, cert, dir: '/data/st', ...args })
+    const r = await requestStore({ masterPubkey: iss, proxyUrl: process.env.PROXY, device, cert, acta, dir: '/data/st', ...args })
     console.log('RES:' + JSON.stringify(r))
   } catch (e) { console.log('ERR:' + e.message) }
   process.exit(0)

@@ -93,7 +93,11 @@ function abrirTui ({ dir, lang = 'es', cols = 120, rows = 60 } = {}) {
   return api
 }
 
-const leerJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')) } catch { return null } }
+// EL CANAL LOCAL VA CIFRADO desde vaultd 0.89 (`src/ipc.js`): leerlo con `JSON.parse` daba
+// null siempre, y cada escenario que necesitaba el QR fallaba con «la TUI no llegó a abrir
+// un emparejamiento» aunque la TUI lo tuviera en pantalla.
+const { ipcRead } = await import(path.join(ROOT, 'dotrino-vault/src/ipc.js'))
+const leerJson = (f) => ipcRead(f, null)
 
 /**
  * El QR que la TUI acaba de abrir: se lee del MISMO archivo que ella está pintando, en vez
@@ -447,6 +451,58 @@ escenario('al expulsado que vuelve a llamar se le ATIENDE, para poder darle el a
     true,
     'FIRMADO por la maestra y para ESTE aparato: es lo único que le puede borrar la cuenta'
   )
+})
+
+/**
+ * UNA SEGUNDA BÓVEDA ENTRA EN LA CUENTA DE ESTA, DESDE SU TUI (tecla `j`).
+ *
+ * Hasta vaultd 0.117 esto solo se podía con `dotrino-vault join <invitación>` en la otra
+ * máquina. Lo que se prueba es el camino entero con dos daemons de verdad: la invitación se
+ * pega en la TUI de B, B enseña el código, A lo aprueba, y B acaba con la cuenta de A como
+ * bóveda activa.
+ *
+ * Y una cosa que ningún test de un proceso ve: MIENTRAS B espera el código, su daemon sigue
+ * contestando. Antes el `join` se esperaba dentro del bucle que atiende las peticiones, así
+ * que durante esos minutos la TUI de B recibía «el daemon no respondió» a todo.
+ */
+escenario('j: otra bóveda pega la invitación en SU TUI y entra en la cuenta', async () => {
+  const { encodeInvite } = await import(path.join(ROOT, 'dotrino-vault/lib/src/invite.js'))
+  const b = await startVault({ proxyUrl: proxy.url, name: 'boveda-b', log })
+  const tuiB = abrirTui({ dir: b.dir })
+  try {
+    await tuiB.esperar(/Bóveda activa/)
+    const antes = (await vault.members()).members.length
+
+    const qr = await vault.pair()
+    tuiB.teclas('j')
+    await tuiB.esperar(/Invitación de la otra bóveda/)
+    tuiB.teclas(encodeInvite(qr) + '\r')
+    await tuiB.esperar(/Cómo se llamará aquí/)
+    tuiB.teclas('Cuenta A\r')
+    const conCodigo = await tuiB.esperar(/approve \d{6}/)
+    const code = conCodigo.match(/approve (\d{6})/)[1]
+    log('[test] B enseña el código ' + code)
+
+    // B está esperando a una persona: su daemon tiene que seguir atendiendo igual.
+    const t0 = Date.now()
+    await b.members(5000)
+    assert.ok(Date.now() - t0 < 5000, 'el daemon de B contesta mientras espera el código')
+
+    vault.approve(code)
+    const hecho = await tuiB.esperar(/acta #\d+/, 30000)
+    assert.match(hecho, /contraseña/, 'y avisa de ponerle contraseña antes de darle «sella»')
+
+    const actaA = await vault.members()
+    assert.equal(actaA.members.length, antes + 1, 'B entra en el acta de A')
+    const actaB = await b.members()
+    if (actaA.profileId || actaB.profileId) assert.equal(actaB.profileId, actaA.profileId, 'y B tiene LA MISMA cuenta, no una copia')
+
+    tuiB.teclas('\r')
+    const lista = await tuiB.esperar(/Cuenta A/)
+    assert.match(lista, /Bóveda activa: ● Cuenta A/, 'la cuenta nueva es la activa')
+  } finally {
+    tuiB.cerrar()
+  }
 })
 
 // ---------------------------------------------------------------------------

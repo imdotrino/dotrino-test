@@ -118,7 +118,21 @@ escenario('`/vault` decide sola: sin bóveda fuera, ESTE aparato es la bóveda y
   // emparejamiento con su propia lista—, y la prueba se quedó esperando algo borrado.
   // Lo que se comprueba ahora es lo que sí tiene que estar: que el mostrador de
   // contraseñas está en marcha en esta misma página.
-  await page.waitForSelector('[data-testid="passwords-desk"] [data-testid="ring-on"], [data-testid="passwords-desk"] [data-testid="ring-enable"]', { timeout: 30000 })
+  //
+  // Un navegador nuevo no tiene todavía contraseña de recuperación, y en la pestaña es la
+  // única llave de la bóveda: el mostrador no atiende hasta tenerla. Pero la página NO se
+  // bloquea (dueño, 2026-09-24): se ve entera, con el aviso arriba y el timbre deshabilitado.
+  const desk = page.locator('[data-testid="passwords-desk"]')
+  await desk.locator('[data-testid="recovery-notice"]').waitFor({ timeout: 30000 })
+  assert.ok(await desk.locator('[data-testid="ring-enable"]').isDisabled(), 'sin contraseña, el timbre se ve pero deshabilitado')
+  assert.ok(await desk.locator('[data-testid="kept-count"]').isVisible(), 'y el resto de la página se ve')
+
+  const clave = 'una contraseña de prueba larga'
+  await desk.locator('[data-testid="pw1"]').fill(clave)
+  await desk.locator('[data-testid="pw2"]').fill(clave)
+  await desk.locator('[data-testid="pw-go"]').click()
+  await page.waitForSelector('[data-testid="passwords-desk"] [data-testid="ring-on"], [data-testid="passwords-desk"] [data-testid="ring-enable"]:not([disabled])', { timeout: 30000 })
+  assert.equal(await desk.locator('[data-testid="recovery-notice"]').count(), 0, 'con la contraseña puesta, el aviso se va')
   await page.close()
 })
 

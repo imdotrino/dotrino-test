@@ -23,7 +23,8 @@
     "smoke:replica": "node smoke/replica.mjs",
     "smoke:directo": "node smoke/directo.mjs",
     "smoke:abrir": "node smoke/abrir-a-distancia.mjs",
-    "smoke:sellado": "node smoke/sellado-desconocidos.mjs"
+    "smoke:sellado": "node smoke/sellado-desconocidos.mjs",
+    "smoke:perfil-nuevo": "node smoke/perfil-nuevo.mjs"
   },
   "devDependencies": {
     "@vitejs/plugin-basic-ssl": "2.3.0",

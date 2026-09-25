@@ -25,7 +25,8 @@
     "smoke:abrir": "node smoke/abrir-a-distancia.mjs",
     "smoke:sellado": "node smoke/sellado-desconocidos.mjs",
     "smoke:perfil-nuevo": "node smoke/perfil-nuevo.mjs",
-    "smoke:actualizacion": "node smoke/actualizacion.mjs"
+    "smoke:actualizacion": "node smoke/actualizacion.mjs",
+    "smoke:llave-del-chip": "node smoke/llave-del-chip.mjs"
   },
   "devDependencies": {
     "@vitejs/plugin-basic-ssl": "2.3.0",

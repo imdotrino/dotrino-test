@@ -100,6 +100,46 @@ escenario('la bóveda ENSEÑA el perfil que le mandó el aparato (dotrino-vault 
   assert.doesNotMatch(out, /0999999999/, 'y su valor no se enseña:\n' + out)
 })
 
+escenario('un SEGUNDO aparato que entra a la cuenta BAJA el perfil (nombre, foto y datos)', async () => {
+  // El caso del teléfono del dueño (2026-09-25): emparejó la app con la bóveda abierta y el
+  // perfil salió vacío, sin foto ni datos, aunque la bóveda los tenía.
+  const lineas = []
+  boveda.lanzar(`${BINARIO} --ctl pair`, { env: ENV, onLinea: (l) => { lineas.push(l.trim()); log('[pair2] ' + l) } })
+  const qr = await esperar(() => { for (const l of lineas) { const o = l.length > 20 && parseInvite(l); if (o?.sn) return o } return null }, { que: 'la invitación' })
+  const otro = crearCaja('aparato2-perfil')
+  let codigo = null
+  let visto = null
+  otro.lanzar(`node --input-type=module -e "$GUION"`, {
+    env: {
+      QR: JSON.stringify(qr),
+      GUION: `
+        import { Identity } from '/eco/dotrino-identity/src/node.js'
+        const id = await Identity.connect({ dir: '/data/identidad2' })
+        id.onVault((e) => { if (e.phase === 'challenge') console.log('CODE:' + e.code) })
+        const r = await id.enrollDevice(JSON.parse(process.env.QR), { label: 'telefono', join: 'new' })
+        console.log('ENROLADO:' + JSON.stringify(r?.join || null))
+        let me = null
+        for (let i = 0; i < 40; i++) {
+          me = await id.getMe()
+          if (me?.nickname === 'Crifa' && me?.avatar) break
+          await new Promise((r) => setTimeout(r, 500))
+        }
+        console.log('ME2:' + JSON.stringify({ nickname: me?.nickname, avatar: !!me?.avatar, email: me?.email ?? me?.fields?.email ?? null, telefono: me?.telefono ?? me?.fields?.telefono ?? null }))
+        setTimeout(() => process.exit(0), 500)
+      `
+    },
+    onLinea: (l) => {
+      log('[aparato2] ' + l)
+      const m = /CODE:(\d+)/.exec(l); if (m && !codigo) { codigo = m[1]; ctl('approve ' + codigo) }
+      if (l.startsWith('ME2:')) visto = JSON.parse(l.slice(4))
+    }
+  })
+  await esperar(() => visto, { timeoutMs: 60000, que: 'que el segundo aparato diga qué perfil tiene' })
+  assert.equal(visto.nickname, 'Crifa', 'el nombre: ' + JSON.stringify(visto))
+  assert.equal(visto.avatar, true, 'la foto: ' + JSON.stringify(visto))
+  assert.equal(visto.email, 'crifa@example.com', 'un dato público: ' + JSON.stringify(visto))
+})
+
 escenario('con el perfil CERRADO enseña lo público igual, y no lista los nombres de lo privado', async () => {
   // Es como estaba el de Crifa en la máquina del dueño: 🔒 tras 5 min sin usarse.
   // Un perfil SIN contraseña no se cierra de verdad (no hay con qué): se le pone una, como el

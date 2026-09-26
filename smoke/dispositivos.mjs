@@ -76,9 +76,9 @@ async function levantarBoveda () {
  * `dotrino-vault pair` con el CLI real del binario. Con `servicio` es `pair --service <ns>`:
  * el cert sale acotado a ese cajón y en el acta entra como SERVICIO con ese CN.
  */
-async function abrirEmparejamiento ({ servicio } = {}) {
+async function abrirEmparejamiento ({ servicio, scope } = {}) {
   const lineas = []
-  boveda.lanzar(`${BINARIO} --ctl pair${servicio ? ' --service ' + servicio : ''}`, {
+  boveda.lanzar(`${BINARIO} --ctl pair${servicio ? ' --service ' + servicio : ''}${scope ? ' --scope ' + scope : ''}`, {
     env: { DOTRINO_VAULT_DIR: '/data/vault' },
     onLinea: (l) => { lineas.push(l.trim()); log('[pair] ' + l) }
   })
@@ -132,6 +132,20 @@ const DISPOSITIVOS = [
       const qr = JSON.parse(process.env.QR)
       const r = await enroll({ qr, label: 'cliente-node', dir: '/data/dev', onChallenge: (c) => console.log('CODE:' + c.code) })
       console.log('OK:' + JSON.stringify({ pub: r.device.publickey, cert: !!r.cert, iss: r.cert.iss === qr.iss }))
+    `
+  },
+  {
+    // LOS PERMISOS SE ELIGEN AL EMPAREJAR (vaultd 0.132.0): entra ya con `administra` y
+    // `aprueba`, en la MISMA acta que lo admite — antes hacían falta dos.
+    nombre: 'con-permisos',
+    que: 'un aparato que entra YA con administra y aprueba, en una sola acta',
+    scope: 'firma,lee,administra,aprueba',
+    permisos: ['administra el perfil', 'aprueba pedidos'],
+    guion: `
+      import { enroll } from '/eco/dotrino-vault/src/client.js'
+      const qr = JSON.parse(process.env.QR)
+      const r = await enroll({ qr, label: 'con-permisos', dir: '/data/perm', onChallenge: (c) => console.log('CODE:' + c.code) })
+      console.log('OK:' + JSON.stringify({ pub: r.device.publickey, cert: !!r.cert }))
     `
   },
   {
@@ -223,6 +237,7 @@ escenario('la bóveda arranca COMO BINARIO y su CLI responde', async () => {
 
 for (const d of DISPOSITIVOS) {
   escenario(`empareja ${d.nombre} — ${d.que}`, async () => {
+    const actaAntes = Number((/acta #(\d+)/.exec(miembros()) || [])[1])
     const r = await emparejar(d)
     assert.ok(r.pub, 'generó su propia llave, en su propia máquina')
     emparejados.push({ ...r, def: d })
@@ -233,6 +248,14 @@ for (const d of DISPOSITIVOS) {
     const suId = await idDe(r.pub)
     assert.ok(salida.includes(suId), `la bóveda no lista a ${d.nombre} (${suId}):\n` + salida)
     if (d.servicio) assert.match(salida, new RegExp(`servicio «${d.servicio}»`), 'y como servicio')
+    if (d.permisos) {
+      // La línea de permisos va justo debajo de la del aparato.
+      const lineas = salida.replace(/\x1b\[[0-9;]*m/g, '').split('\n')
+      const i = lineas.findIndex((l) => l.includes(suId))
+      for (const p of d.permisos) assert.ok((lineas[i + 1] || '').includes(p), `${d.nombre} no entró con «${p}»:\n` + salida)
+      const actaDespues = Number((/acta #(\d+)/.exec(salida) || [])[1])
+      assert.equal(actaDespues, actaAntes + 1, 'entrar con sus permisos cuesta UNA acta, no dos')
+    }
   })
 }
 

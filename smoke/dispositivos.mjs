@@ -259,7 +259,7 @@ for (const d of DISPOSITIVOS) {
   })
 }
 
-escenario('la terminal abre una shell entre dos máquinas, por el proxio y contra el acta', async () => {
+escenario('la terminal abre una shell entre dos máquinas, y al volver sigue ahí con su pantalla', async () => {
   const agente = emparejados.find((e) => e.def.nombre === 'terminal')
   const cliente = emparejados.find((e) => e.def.nombre === 'remote-agent')
   assert.ok(agente && cliente, 'hacen falta la máquina de la terminal y otro aparato de la cuenta')
@@ -295,11 +295,32 @@ escenario('la terminal abre una shell entre dos máquinas, por el proxio y contr
     // La app encuentra la máquina preguntándole QUÉ ES, no por el nombre del acta.
     const found = await probeAgents(rc.client, [process.env.AGENT])
     if (found.get(process.env.AGENT)?.kind !== 'terminal-agent') { console.log('FAIL: kind ' + JSON.stringify([...found])); process.exit(1) }
+    setTimeout(() => { console.log('FAIL: timeout'); process.exit(1) }, 30000)
+    // Espera el primer mensaje de ese tipo (o que la salida acumulada contenga algo).
+    const esperar = (c, cond) => new Promise((res) => { const off = c.on('message', (p) => { if (cond(p)) { off(); res(p) } }) })
     let out = ''
-    rc.on('message', (p) => { if (p.type === 'out') { out += p.data; if (out.includes('dotrino-42')) { console.log('OK'); process.exit(0) } } })
+    rc.on('message', (p) => { if (p.type === 'out' || p.type === 'replay') out += p.data })
+    const abierta = esperar(rc, (p) => p.type === 'attached')
     await rc.send({ type: 'open', cols: 80, rows: 24 })
+    const { id } = await abierta
+    const eco = esperar(rc, () => out.includes('dotrino-42'))
     await rc.send({ type: 'input', data: 'echo dotrino-$((40+2))\\r' })
-    setTimeout(() => { console.log('FAIL: ' + JSON.stringify(out)); process.exit(1) }, 15000)
+    await eco
+    await rc.close()                                   // el navegador se fue: la consola sigue
+
+    // Otra conexión (otro aparato, o el mismo tras recargar) vuelve y ve la pantalla.
+    const rc2 = new RemoteAgentClient(link, { agentPubkey: process.env.AGENT })
+    await rc2.connect()
+    const lista = esperar(rc2, (p) => p.type === 'consoles')
+    await rc2.send({ type: 'list' })
+    if (!(await lista).list.some((c) => c.id === id)) { console.log('FAIL: console gone after leaving'); process.exit(1) }
+    let pantalla = ''
+    rc2.on('message', (p) => { if (p.type === 'replay') pantalla += p.data })
+    const enganchada = esperar(rc2, (p) => p.type === 'attached')
+    await rc2.send({ type: 'attach', id, cols: 80, rows: 24 })
+    await enganchada
+    if (!pantalla.includes('dotrino-42')) { console.log('FAIL: screen not restored ' + JSON.stringify(pantalla.slice(-200))); process.exit(1) }
+    console.log('OK'); process.exit(0)
   `)
   cliente.caja.lanzar('node /data/consola.mjs', {
     env: { AGENT: agente.pub },

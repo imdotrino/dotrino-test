@@ -154,7 +154,7 @@ const DISPOSITIVOS = [
     guion: `
       import { enroll } from '/eco/dotrino-terminal/agent/link.js'
       const qr = JSON.parse(process.env.QR)
-      const r = await enroll({ qr, label: 'terminal', dir: '/data/terminal', onChallenge: (c) => console.log('CODE:' + c.code) })
+      const r = await enroll({ qr, dir: '/data/terminal', onChallenge: (c) => console.log('CODE:' + c.code) })
       console.log('OK:' + JSON.stringify({ pub: r.device.publickey, cert: !!r.cert }))
     `
   },
@@ -258,6 +258,52 @@ for (const d of DISPOSITIVOS) {
     }
   })
 }
+
+escenario('la terminal abre una shell entre dos máquinas, por el proxio y contra el acta', async () => {
+  const agente = emparejados.find((e) => e.def.nombre === 'terminal')
+  const cliente = emparejados.find((e) => e.def.nombre === 'remote-agent')
+  assert.ok(agente && cliente, 'hacen falta la máquina de la terminal y otro aparato de la cuenta')
+
+  // La máquina: el agente de verdad, con su PTY, en su caja.
+  const salidaAgente = []
+  agente.caja.escribir('/data/agente.mjs', `
+    import { startAgent } from '/eco/dotrino-terminal/agent/index.js'
+    const a = await startAgent({ dir: '/data/terminal', shell: '/bin/sh' })
+    console.log('READY:' + a.machine)
+    setInterval(() => {}, 1 << 30)
+  `)
+  agente.caja.lanzar('node /data/agente.mjs', { onLinea: (l) => { salidaAgente.push(l); log('[agente] ' + l) } })
+  await esperar(() => salidaAgente.some((l) => l.startsWith('READY:')), { que: 'que el agente de terminal arranque' })
+    .catch(() => { throw new Error('el agente no arrancó:\n' + salidaAgente.join('\n')) })
+
+  // El otro aparato: el MISMO cliente que usa la PWA, con la identidad de su enlace.
+  const lineas = []
+  let ok = false
+  cliente.caja.escribir('/data/consola.mjs', `
+    import { loadLink, clientLink } from '/eco/dotrino-remote-agent/src/link.js'
+    import { RemoteAgentClient } from '/eco/dotrino-remote-agent/src/client.js'
+    const link = clientLink(loadLink('/data/remoto'), { dir: '/data/remoto' })
+    // El agente trae el acta en su primer tic: hasta entonces no atiende a nadie, y
+    // eso es lo correcto. Se reintenta el saludo, no se relaja.
+    let rc
+    for (let i = 0; i < 20; i++) {
+      rc = new RemoteAgentClient(link, { agentPubkey: process.env.AGENT })
+      try { await rc.connect(); break } catch (e) { console.log('retry: ' + e.message); await rc.close(); rc = null; await new Promise((r) => setTimeout(r, 1000)) }
+    }
+    if (!rc) { console.log('FAIL: no session'); process.exit(1) }
+    let out = ''
+    rc.on('message', (p) => { if (p.type === 'out') { out += p.data; if (out.includes('dotrino-42')) { console.log('OK'); process.exit(0) } } })
+    await rc.send({ type: 'open', cols: 80, rows: 24 })
+    await rc.send({ type: 'input', data: 'echo dotrino-$((40+2))\\r' })
+    setTimeout(() => { console.log('FAIL: ' + JSON.stringify(out)); process.exit(1) }, 15000)
+  `)
+  cliente.caja.lanzar('node /data/consola.mjs', {
+    env: { AGENT: agente.pub },
+    onLinea: (l) => { lineas.push(l); log('[consola] ' + l); if (l === 'OK') ok = true }
+  })
+  await esperar(() => ok || lineas.some((l) => l.startsWith('FAIL')), { timeoutMs: 45000, que: 'la salida de la shell remota' })
+  assert.ok(ok, 'la shell remota no devolvió la salida:\n' + lineas.join('\n') + '\n--- agente ---\n' + salidaAgente.join('\n'))
+})
 
 escenario('cada dispositivo tiene SU llave y ninguno ve el disco de otro', async () => {
   const pubs = emparejados.map((e) => e.pub)

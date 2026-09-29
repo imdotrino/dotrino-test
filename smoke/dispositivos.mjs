@@ -282,6 +282,7 @@ escenario('la terminal abre una shell entre dos máquinas, por el proxio y contr
   cliente.caja.escribir('/data/consola.mjs', `
     import { loadLink, clientLink } from '/eco/dotrino-remote-agent/src/link.js'
     import { RemoteAgentClient } from '/eco/dotrino-remote-agent/src/client.js'
+    import { probeAgents } from '/eco/dotrino-remote-agent/src/discover.js'
     const link = clientLink(loadLink('/data/remoto'), { dir: '/data/remoto' })
     // El agente trae el acta en su primer tic: hasta entonces no atiende a nadie, y
     // eso es lo correcto. Se reintenta el saludo, no se relaja.
@@ -291,6 +292,9 @@ escenario('la terminal abre una shell entre dos máquinas, por el proxio y contr
       try { await rc.connect(); break } catch (e) { console.log('retry: ' + e.message); await rc.close(); rc = null; await new Promise((r) => setTimeout(r, 1000)) }
     }
     if (!rc) { console.log('FAIL: no session'); process.exit(1) }
+    // La app encuentra la máquina preguntándole QUÉ ES, no por el nombre del acta.
+    const found = await probeAgents(rc.client, [process.env.AGENT])
+    if (found.get(process.env.AGENT)?.kind !== 'terminal-agent') { console.log('FAIL: kind ' + JSON.stringify([...found])); process.exit(1) }
     let out = ''
     rc.on('message', (p) => { if (p.type === 'out') { out += p.data; if (out.includes('dotrino-42')) { console.log('OK'); process.exit(0) } } })
     await rc.send({ type: 'open', cols: 80, rows: 24 })

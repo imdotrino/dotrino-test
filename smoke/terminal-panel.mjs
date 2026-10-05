@@ -131,8 +131,10 @@ escenario('el TAMAÑO con tres a la vez: lo tiene quien lo fija (📌) o el últ
   await sleep(600)
   assert.equal(await tam(), '100x30', 'escribir no cambia el tamaño')
   // 📌 en la PWA: se lo queda, y las ventanas no lo cambian aunque se redimensionen.
+  assert.equal(await pagina.locator('.side [data-act="pin"]').getAttribute('title'), 'Fijar el tamaño de la consola 1 a esta pantalla', 'el 📌 dice a qué consola afecta')
   await pagina.locator('.side [data-act="pin"]').click()
   await esperar(async () => (await tam()) === tamPwa, { que: 'que el 📌 le dé el tamaño a la PWA' })
+  assert.match(await pagina.locator('#hint').innerText(), /Consola 1: el tamaño queda fijado a esta pantalla/, 'y lo dice en la línea de estado')
   await esperar(async () => pagina.locator('.side [data-act="pin"].on').count(), { que: 'que el 📌 se vea encendido' })
   v1.send({ type: 'resize', cols: 170, rows: 50 })
   await sleep(400)

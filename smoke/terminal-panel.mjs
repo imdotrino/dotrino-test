@@ -114,6 +114,8 @@ escenario('«+» abre otra; clic en un número cambia a esa por la misma conexi�
   await pagina.locator('.side .sbtn.num', { hasText: /^1$/ }).click()
   await esperar(async () => (await panel()).on === '1', { que: 'que vuelva a la 1' })
   assert.equal((await consolas()).find((c) => c.n === 2).viewers, 0, 'y ahora la suelta es la 2')
+  // SMOKE_SHOT=<ruta.png>: una captura de la pantalla de consolas, para mirarla.
+  if (process.env.SMOKE_SHOT) await pagina.screenshot({ path: process.env.SMOKE_SHOT })
 })
 
 escenario('el TAMAÑO con tres a la vez: lo tiene quien lo fija (📌) o el último que llegó; escribir no lo cambia', async () => {

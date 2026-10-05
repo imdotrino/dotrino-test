@@ -158,6 +158,18 @@ escenario('la × de la consola de esta pestaña pasa primero a otra, y luego la 
   assert.equal(quedan[0].viewers, 1, 'y la pestaña pasó a ella en vez de quedarse sin consola')
 })
 
+escenario('sin el agente, la página dice que no puede conectar y enlaza la guía; no queda una pestaña colgada', async () => {
+  agente.close(); agente = null
+  await pagina.reload()
+  // La pestaña que había se reabre sola al recargar; al no conectar, se quita y se dice.
+  await esperar(async () => (await pagina.locator('#hint a[href*="wiki.dotrino.com"]').count()) > 0, { timeoutMs: 60000, que: 'el aviso de que no se pudo conectar, con su enlace' })
+  assert.equal(await pagina.locator('.term-wrap').count(), 0, 'no queda ninguna pestaña sin conexión')
+  // Y la lista de máquinas no documenta nada: un aviso y el enlace al wiki (§5.1, §9.2).
+  await esperar(async () => pagina.locator('[data-testid="no-machines"]').count(), { timeoutMs: 45000, que: 'el aviso de que no hay máquinas' })
+  assert.ok(await pagina.locator('[data-testid="no-machines"] a[href*="wiki.dotrino.com"]').count(), 'con el enlace a la guía')
+  assert.equal(await pagina.locator('#machines pre, #machines code').count(), 0, 'sin bloques de comandos')
+})
+
 console.log('\nSMOKE · el panel de consolas de la PWA de terminal, todo en local\n')
 for (const [dir, como] of [[CONSOLA, 'cd dotrino-vault/web && npm run build'], [PWA, 'cd dotrino-terminal && npm run build']]) {
   if (!fs.existsSync(path.join(dir, 'index.html'))) { console.error(`Falta un build. Hazlo con:  ${como}\n`); process.exit(2) }

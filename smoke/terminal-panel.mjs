@@ -100,6 +100,10 @@ escenario('la PWA encuentra la máquina y, sin consolas, abre una', async () => 
   await maquina.click()
   await esperar(async () => (await consolas()).length === 1, { que: 'que la PWA abra una consola' })
   await esperar(async () => (await panel()).on === '1', { que: 'que el panel marque la 1' })
+  // La consola usa toda la ventana, no una tarjeta estrecha.
+  const caja = await pagina.locator('.term-wrap').first().boundingBox()
+  assert.ok(caja.width > 900 * 0.9, `la consola ocupa el ancho (${caja.width} de 900)`)
+  assert.ok(caja.height > 700 * 0.6, `y el alto (${caja.height} de 700)`)
 })
 
 escenario('«+» abre otra; clic en un número cambia a esa por la misma conexión', async () => {
@@ -116,7 +120,9 @@ escenario('el TAMAÑO con tres a la vez: lo tiene quien lo fija (📌) o el últ
   const { connectLocal } = await import(path.join(AGENTE, 'local.js'))
   const una = (await consolas()).find((c) => c.n === 1)
   const tam = async () => { const c = (await consolas()).find((x) => x.n === 1); return `${c.cols}x${c.rows}` }
-  const tamPwa = `${una.cols}x${una.rows}`
+  // El tamaño de la PWA: el que tiene ahora que es la única mirando (ya con el panel puesto).
+  await sleep(500)
+  const tamPwa = await tam()
   // Dos ventanas de la máquina se enganchan a la misma consola: la última que llega lo tiene.
   const v1 = await connectLocal(dirAgente)
   v1.send({ type: 'attach', id: una.id, cols: 160, rows: 50, tag: 'ventana-1' })

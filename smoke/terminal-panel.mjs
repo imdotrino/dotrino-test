@@ -6,7 +6,7 @@
  *   · al conectar se engancha a una consola LIBRE si la hay (y si no, abre una);
  *   · el panel (colapsado) enseña las consolas con su número fijo y marca la de esta pestaña;
  *   · «+» abre otra y clic en un número cambia a esa, por la misma conexión;
- *   · el TAMAÑO con tres a la vez: lo tiene quien lo fija (📌) o el último que llegó; escribir no
+ *   · el TAMAÑO con tres a la vez: lo tiene quien lo fija (⤢) o el último que llegó; escribir no
  *     lo cambia; la pantalla fijada se sigue al redimensionarse, y al soltarla vuelve al último;
  *   · la × de la consola de esta pestaña pasa primero a otra.
  *
@@ -118,7 +118,7 @@ escenario('«+» abre otra; clic en un número cambia a esa por la misma conexi�
   if (process.env.SMOKE_SHOT) await pagina.screenshot({ path: process.env.SMOKE_SHOT })
 })
 
-escenario('el TAMAÑO con tres a la vez: lo tiene quien lo fija (📌) o el último que llegó; escribir no lo cambia', async () => {
+escenario('el TAMAÑO con tres a la vez: lo tiene quien lo fija (⤢) o el último que llegó; escribir no lo cambia', async () => {
   const { connectLocal } = await import(path.join(AGENTE, 'local.js'))
   const una = (await consolas()).find((c) => c.n === 1)
   const tam = async () => { const c = (await consolas()).find((x) => x.n === 1); return `${c.cols}x${c.rows}` }
@@ -138,21 +138,32 @@ escenario('el TAMAÑO con tres a la vez: lo tiene quien lo fija (📌) o el últ
   v1.send({ type: 'input', data: ' ' })
   await sleep(600)
   assert.equal(await tam(), '100x30', 'escribir no cambia el tamaño')
-  // 📌 en la PWA: se lo queda, y las ventanas no lo cambian aunque se redimensionen.
-  assert.equal(await pagina.locator('.side [data-act="pin"]').getAttribute('title'), 'Fijar el tamaño de la consola 1 a esta pantalla', 'el 📌 dice a qué consola afecta')
+  // ⤢ en la PWA: se lo queda, y las ventanas no lo cambian aunque se redimensionen.
+  assert.equal(await pagina.locator('.side [data-act="pin"]').getAttribute('title'), 'Usar el tamaño de esta pantalla en la consola 1', 'el ⤢ dice a qué consola afecta')
   await pagina.locator('.side [data-act="pin"]').click()
-  await esperar(async () => (await tam()) === tamPwa, { que: 'que el 📌 le dé el tamaño a la PWA' })
-  assert.match(await pagina.locator('#hint').innerText(), /Consola 1: el tamaño queda fijado a esta pantalla/, 'y lo dice en la línea de estado')
-  await esperar(async () => pagina.locator('.side [data-act="pin"].on').count(), { que: 'que el 📌 se vea encendido' })
+  await esperar(async () => (await tam()) === tamPwa, { que: 'que el ⤢ le dé el tamaño a la PWA' })
+  assert.match(await pagina.locator('#hint').innerText(), /Consola 1: usa el tamaño de esta pantalla/, 'y lo dice en la línea de estado')
+  await esperar(async () => pagina.locator('.side [data-act="pin"].on').count(), { que: 'que el ⤢ se vea encendido' })
   v1.send({ type: 'resize', cols: 170, rows: 50 })
   await sleep(400)
   assert.equal(await tam(), tamPwa, 'con la PWA fijada, la ventana no lo cambia')
   // Girar / redimensionar el teléfono fijado: se sigue.
   await pagina.setViewportSize({ width: 600, height: 700 })
   await esperar(async () => (await tam()) !== tamPwa, { que: 'que el tamaño siga a la pantalla fijada' })
-  // Soltarlo: vuelve al último que llegó (la ventana 2).
+  // Pasar a otra consola y volver: la elección es de esta pantalla, no de la conexión.
+  await pagina.locator('.side .sbtn.num', { hasText: /^2$/ }).click()
+  await esperar(async () => (await panel()).on === '2', { que: 'que pase a la 2' })
+  await esperar(async () => (await tam()) === '100x30', { que: 'que, sin ella, mande la ventana 2' })
+  await pagina.locator('.side .sbtn.num', { hasText: /^1$/ }).click()
+  await esperar(async () => (await panel()).on === '1', { que: 'que vuelva a la 1' })
+  await esperar(async () => (await tam()) !== '100x30', { que: 'que al volver recupere el tamaño elegido' })
+  await esperar(async () => pagina.locator('.side [data-act="pin"].on').count(), { que: 'y el ⤢ siga encendido' })
+  // Soltarlo: manda el último que llegó, que ahora es esta pestaña (acaba de volver); la ventana
+  // 2 se lo queda si se engancha de nuevo.
   await pagina.locator('.side [data-act="pin"]').click()
-  await esperar(async () => (await tam()) === '100x30', { que: 'que al soltarlo vuelva al último que llegó' })
+  await esperar(async () => !(await consolas()).find((c) => c.n === 1).sizeBy.pinned, { que: 'que al soltarlo ya no esté elegido' })
+  v2.send({ type: 'attach', id: una.id, cols: 100, rows: 30, tag: 'ventana-2' })
+  await esperar(async () => (await tam()) === '100x30', { que: 'que sin elección mande el último que llegó' })
   v1.send({ type: 'detach' }); v1.close(); v2.send({ type: 'detach' }); v2.close()
   await pagina.setViewportSize({ width: 900, height: 700 })
 })

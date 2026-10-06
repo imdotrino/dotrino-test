@@ -81,6 +81,13 @@ firewall () {
     ip6tables -A OUTPUT -p udp -d "$ns" --dport 53 -j ACCEPT
     ip6tables -A OUTPUT -p tcp -d "$ns" --dport 53 -j ACCEPT
   done
+  # El descubrimiento de vecinos de IPv6 va por ICMPv6. Sin él la máquina deja de contestar
+  # por IPv6 en cuanto caduca su caché de vecinos: en Fly, el SSH (que entra por la red
+  # privada IPv6) se colgaba unos minutos después de arrancar. Solo esos tipos, más
+  # «paquete demasiado grande», que hace falta para que TCP no se atasque.
+  for t in neighbour-solicitation neighbour-advertisement router-solicitation packet-too-big; do
+    ip6tables -A OUTPUT -p icmpv6 --icmpv6-type "$t" -j ACCEPT
+  done
   ip6tables -P OUTPUT DROP
   say "firewall on: egress only to $host ($(echo $ips | tr '\n' ' '))"
 }

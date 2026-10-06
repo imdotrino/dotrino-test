@@ -64,7 +64,12 @@ La configuración es `fly.toml` de esta carpeta. No expone ningún servicio: la 
 al proxio.
 
 Comprobado en la Machine: `iptables` e `ip6tables` funcionan como root, y el resolver es
-`fdaa::3` (IPv6), por eso el firewall deja pasar el DNS en las dos familias.
+`fdaa::3` (IPv6), por eso el firewall deja pasar el DNS en las dos familias. También deja pasar
+el descubrimiento de vecinos de ICMPv6: sin él, la Machine dejaba de contestar por IPv6 al caducar
+su caché de vecinos, y `fly ssh console` (que entra por la red privada IPv6) se colgaba.
+
+Si el SSH no responde, `fly machine exec <id> '<orden>'` va por la API y no por la red de la
+Machine.
 
 ```bash
 cd dotrino-test/demo-apple

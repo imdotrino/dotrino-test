@@ -56,6 +56,41 @@ docker run -d --name demo-apple --restart always \
 | `DEMO_PROXY` | el proxio (por defecto `wss://proxy.dotrino.com`) |
 | `DEMO_USER` / `DEMO_MACHINE_NAME` | solo al preparar: el usuario (`apple`) y el nombre de la máquina |
 
-En Fly.io (sin probar todavía): una Machine con un volumen en `/data`, la política de reinicio
-`always` y las mismas variables. Que `iptables` funcione dentro de su microVM está por
-comprobar; con `DEMO_FIREWALL=1`, si no funciona, el contenedor no arranca y lo dice.
+## Dónde corre: Fly.io
+
+App **`dotrino-demo-apple`** (organización `dotrino`, cuenta `sandrade@dotrino.com`), región
+`ord`, una Machine `shared-cpu-1x` de 512 MB con el volumen cifrado `demo_data` en `/data`.
+La configuración es `fly.toml` de esta carpeta. No expone ningún servicio: la máquina solo sale
+al proxio.
+
+Comprobado en la Machine: `iptables` e `ip6tables` funcionan como root, y el resolver es
+`fdaa::3` (IPv6), por eso el firewall deja pasar el DNS en las dos familias.
+
+```bash
+cd dotrino-test/demo-apple
+fly deploy --ha=false --local-only      # una sola Machine: el volumen es uno
+```
+
+**Preparar** se hace dentro de la Machine, que sin copia espera en vez de salir:
+
+```bash
+fly ssh console --pty -C '/opt/demo/entrypoint.sh preparar' -a dotrino-demo-apple
+fly machine restart -a dotrino-demo-apple
+```
+
+**Ver que sirve:** `fly logs -a dotrino-demo-apple` tiene que enseñar `firewall on`,
+`identified on the proxy` y `agente activo`, y repetirlo cada hora (`DEMO_RESET_SECONDS`).
+
+**Volver a preparar** (cambia la dirección, hay que actualizar App Store Connect). Nunca con
+`servir` en marcha, o habría dos bóvedas sobre `/data/run`: primero se borra la copia y se
+reinicia, y la Machine se queda esperando.
+
+```bash
+fly ssh console -C 'rm -rf /data/copia /data/machine-id' -a dotrino-demo-apple
+fly machine restart -a dotrino-demo-apple          # sin copia: espera
+fly ssh console --pty -C '/opt/demo/entrypoint.sh preparar' -a dotrino-demo-apple
+fly machine restart -a dotrino-demo-apple
+```
+
+El volumen guarda snapshots diarios (5 de retención). Contienen la bóveda de la demo, que no
+vale nada fuera de ella.

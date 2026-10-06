@@ -1,5 +1,5 @@
 /**
- * LA IMAGEN DE LA DEMO PARA APPLE (`demo-apple/`), de punta a punta y con un navegador.
+ * LA IMAGEN DE LA DEMO PARA APPLE (repo `dotrino-demo-apple`), de punta a punta y con un navegador.
  *
  * Lo que comprueba, con la imagen de verdad (paquetes de npm, no el código del disco):
  *   · `preparar` crea la cuenta del revisor y la máquina, y deja la dirección;
@@ -27,7 +27,7 @@ const log = (m) => { if (LOGS) console.log(m) }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 const IMAGEN = 'dotrino-demo-apple:smoke'
-const CONTEXTO = path.join(ROOT, 'dotrino-test/demo-apple')
+const CONTEXTO = path.join(ROOT, 'dotrino-demo-apple')
 const IFRAME = path.join(ROOT, 'dotrino-identity/vault')
 const PWA = path.join(ROOT, 'dotrino-terminal/dist')
 const CLAVE = 'contrasena-de-prueba-larga'
@@ -150,6 +150,27 @@ escenario('el reset (reiniciar el contenedor) borra lo que dejó y el mismo tel�
   await esperar(() => arranques() > antes, { timeoutMs: 30000, que: 'que la máquina vuelva a arrancar' })
   const t = await enLaShell(telefono, 'ls -A ~ /tmp; echo fin-$((2*2))', 'fin-4')
   assert.doesNotMatch(t, /sucio/, 'ni ~/sucio ni /tmp/sucio')
+})
+
+escenario('sin volumen (Timone): la copia llega por DEMO_COPIA_B64, contesta en el puerto y el revisor entra', async () => {
+  // `exportar` desde un contenedor con el volumen; la copia sale como una línea.
+  const ex = docker('run', '--rm', '-v', `${volumen}:/data`, IMAGEN, 'exportar')
+  assert.equal(ex.status, 0, 'exportar: ' + ex.stderr)
+  const b64 = ex.stdout.trim()
+  assert.match(b64, /^[A-Za-z0-9+/=]+$/, 'una sola línea en base64')
+  docker('rm', '-f', contenedor)
+  const puerto = 18000 + Math.floor(Math.random() * 1000)
+  contenedor = `smoke-demo-apple-env-${Date.now().toString(36)}`
+  const r = docker('run', '-d', '--name', contenedor, '--network', 'host',
+    '-e', `DEMO_PROXY=${proxyEnCaja()}`, '-e', `DEMO_COPIA_B64=${b64}`, '-e', `DEMO_HTTP_PORT=${puerto}`, IMAGEN)
+  assert.equal(r.status, 0, 'docker run sin volumen: ' + r.stderr)
+  await esperar(() => arranques() >= 1, { timeoutMs: 30000, que: 'que la máquina arranque' })
+  assert.match(logsDe(), /copy loaded from DEMO_COPIA_B64/, 'cargó la copia de la variable')
+  assert.match(logsDe(), new RegExp('serving ' + direccion.replace(/[-@]/g, '\\$&')), 'con la misma dirección')
+  const ok = await esperar(() => fetch(`http://127.0.0.1:${puerto}/`).then((x) => x.text()).catch(() => null), { que: 'el 200 del puerto' })
+  assert.equal(ok.trim(), 'ok')
+  const t = await enLaShell(telefono, 'id -un; echo fin-$((5+5))', 'fin-10')
+  assert.match(t, /^tester$/m, 'y la shell es de tester')
 })
 
 console.log('\nSMOKE · la imagen de la demo para Apple (preparar, servir, aislamiento y reset)\n')

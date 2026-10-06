@@ -220,6 +220,43 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {} } =
       signal('SIGUSR2')
       await sleep(600)
     },
+    /**
+     * `dotrino-vault logins add <usuario> [nombre] [±permiso …]`: un aparato que se abre con
+     * usuario y contraseña. Mismos pasos que la CLI (`src/ctl.js`, `cmdLogins`): el registro
+     * OPAQUE se termina aquí con la contraseña, y las llaves del aparato nacen aquí y viajan
+     * ya cerradas. Devuelve `{ address, deviceId, caps, pub }`.
+     */
+    async loginsAdd (user, password, { label = 'equipo prestado', caps = ['sign', 'read', 'store'] } = {}) {
+      const salida = path.join(dir, 'logins-list.json')
+      let seq = 0
+      const pedir = async (op, extra) => {
+        try { fs.rmSync(salida, { force: true }) } catch (_) {}
+        const id = `smoke-${++seq}`
+        writeReq('logins-request.json', { op, id, ...extra })
+        signal('SIGUSR2')
+        const t = Date.now() + 15000
+        while (Date.now() < t) {
+          const d = readJson(salida)
+          if (d?.at && (!d.req || d.req === id)) {
+            if (d.ok === false) throw Object.assign(new Error(`logins ${op}: ${d.error}`), { code: d.code })
+            return d
+          }
+          await sleep(100)
+        }
+        throw new Error(`la bóveda no contestó a «logins ${op}»`)
+      }
+      const { client: opaque } = await import(path.join(VAULT_DIR, 'node_modules/@dotrino/opaque/src/index.js'))
+      const { makeDeviceKey, makeDeviceEncKey } = await import(path.join(VAULT_DIR, 'node_modules/@dotrino/identity/vault/capabilities.js'))
+      const { sealDeviceKeys, loginAddress } = await import(path.join(VAULT_DIR, 'lib/src/passwordLogins.js'))
+      const start = opaque.registrationStart({ password })
+      const begun = await pedir('register-begin', { user, request: start.request })
+      const fin = opaque.registrationFinish({ state: start.state, response: begun.response, password })
+      const device = await makeDeviceKey({ label })
+      const enc = await makeDeviceEncKey()
+      const blob = await sealDeviceKeys(fin.exportKey, { sign: device.privateJwk, enc: enc.privateJwk })
+      const r = await pedir('register-finish', { user, upload: fin.upload, pub: device.publickey, encPub: enc.publickey, label, blob, caps })
+      return { address: loginAddress(user, r.fingerprint), deviceId: r.deviceId, caps: r.caps, pub: device.publickey }
+    },
     /** `dotrino-vault secret set <ns> <CLAVE> <valor> [--public]`. */
     async setSecret (ns, key, value, isPublic) {
       writeReq('secret-request.json', { op: 'set', ns, key, value, ...(isPublic === undefined ? {} : { public: isPublic }) })

@@ -122,16 +122,16 @@ escenario('«+» abre otra; clic en un número cambia a esa por la misma conexi�
 escenario('ACTIVIDAD: el panel dice qué consola está trabajando y cuál terminó', async () => {
   const { connectLocal } = await import(path.join(AGENTE, 'local.js'))
   const dos = (await consolas()).find((c) => c.n === 2)
-  // Otra pantalla lanza en la 2 algo que se anuncia como un agente: ◐ en el título mientras
-  // trabaja (Claude; Codex usa un giro braille) y ✳ al terminar.
+  // Otra pantalla lanza en la 2 algo que se comporta como un agente: su título cambia cada
+  // segundo mientras trabaja y después se queda quieto. El agente no lee qué dice: solo que cambia.
   const v = await connectLocal(dirAgente)
   v.send({ type: 'attach', id: dos.id, cols: 80, rows: 24, tag: 'otra' })
   await sleep(400)
-  v.send({ type: 'input', data: "printf '\\033]0;\\342\\227\\220 tarea\\007'; sleep 4; printf '\\033]0;\\342\\234\\263 tarea\\007'\r" })
+  v.send({ type: 'input', data: "for i in 1 2 3 4 5 6; do printf '\\033]0;paso %s\\007' $i; sleep 1; done\r" })
   const dosBtn = pagina.locator('.side .sbtn.num', { hasText: /^2$/ })
   await esperar(async () => (await dosBtn.getAttribute('class')).includes('busy'), { que: 'que el 2 se vea trabajando' })
   if (process.env.SMOKE_SHOT) await pagina.screenshot({ path: process.env.SMOKE_SHOT.replace(/\.png$/, '-actividad.png') })
-  await esperar(async () => (await dosBtn.getAttribute('class')).includes('done'), { que: 'que el 2 se vea terminado' })
+  await esperar(async () => (await dosBtn.getAttribute('class')).includes('done'), { que: 'que el 2 se vea terminado', timeoutMs: 30000 })
   // Atenderla (teclear en ella) apaga el aviso.
   v.send({ type: 'input', data: ' ' })
   await esperar(async () => !/busy|done/.test(await dosBtn.getAttribute('class')), { que: 'que al atenderla se apague' })

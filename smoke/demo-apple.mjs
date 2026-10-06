@@ -90,6 +90,21 @@ escenario('la imagen se construye con los paquetes publicados', async () => {
   assert.equal(r.status, 0, 'docker build: ' + r.stderr)
 })
 
+escenario('sin copia, «servir» espera y dice cómo prepararla (no entra en un bucle de reinicios)', async () => {
+  const vacio = tmpDir('demo-apple-vacio')
+  const nombre = `smoke-demo-apple-vacio-${Date.now().toString(36)}`
+  assert.equal(docker('run', '-d', '--name', nombre, '-v', `${vacio}:/data`, IMAGEN).status, 0)
+  try {
+    const salida = () => { const r = docker('logs', nombre); return (r.stdout || '') + (r.stderr || '') }
+    await esperar(() => salida().includes('nothing to serve'), { que: 'el aviso de que no hay copia' })
+    await sleep(1500)
+    assert.equal(docker('inspect', '-f', '{{.State.Running}}', nombre).stdout.trim(), 'true', 'y sigue en marcha')
+  } finally {
+    docker('rm', '-f', nombre)
+    docker('run', '--rm', '-v', `${vacio}:/data`, '--entrypoint', 'sh', IMAGEN, '-c', 'rm -rf /data/*')
+  }
+})
+
 escenario('«preparar» crea la cuenta del revisor y la máquina (contraseña tecleada en un terminal)', async () => {
   volumen = tmpDir('demo-apple-data')
   // `logins add` lee la contraseña del TERMINAL, así que hace falta uno: `script` lo pone.

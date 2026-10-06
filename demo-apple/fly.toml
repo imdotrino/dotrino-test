@@ -1,0 +1,23 @@
+# La demo de Terminal para la revisión de Apple en Fly.io. Uso en README.md.
+# Sin servicios: nadie entra a esta máquina desde fuera; ella sale al proxio.
+app = "dotrino-demo-apple"
+primary_region = "ord"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  DEMO_FIREWALL = "1"
+  DEMO_RESET_SECONDS = "3600"
+
+[[mounts]]
+  source = "demo_data"
+  destination = "/data"
+
+# Al salir (cada DEMO_RESET_SECONDS) vuelve a arrancar, y arrancar restaura la copia.
+[[restart]]
+  policy = "always"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

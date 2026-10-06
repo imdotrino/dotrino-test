@@ -67,13 +67,21 @@ firewall () {
   iptables -A OUTPUT -o lo -j ACCEPT
   iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
   for ip in $ips; do iptables -A OUTPUT -p tcp -d "$ip" --dport 443 -j ACCEPT; done
-  # El DNS, solo hacia los resolvers del contenedor: el proxio se resuelve al conectar.
+  # El DNS, solo hacia los resolvers del contenedor: el proxio se resuelve al conectar. En
+  # Fly el resolver es IPv6 (fdaa::3), así que hacen falta las dos familias.
   for ns in $(awk '/^nameserver/ && $2 ~ /^[0-9.]+$/ {print $2}' /etc/resolv.conf); do
     iptables -A OUTPUT -p udp -d "$ns" --dport 53 -j ACCEPT
     iptables -A OUTPUT -p tcp -d "$ns" --dport 53 -j ACCEPT
   done
   iptables -P OUTPUT DROP
-  ip6tables -P OUTPUT DROP 2>/dev/null || true
+  ip6tables -F OUTPUT || die "firewall: ip6tables failed"
+  ip6tables -A OUTPUT -o lo -j ACCEPT
+  ip6tables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+  for ns in $(awk '/^nameserver/ && $2 ~ /:/ {print $2}' /etc/resolv.conf); do
+    ip6tables -A OUTPUT -p udp -d "$ns" --dport 53 -j ACCEPT
+    ip6tables -A OUTPUT -p tcp -d "$ns" --dport 53 -j ACCEPT
+  done
+  ip6tables -P OUTPUT DROP
   say "firewall on: egress only to $host ($(echo $ips | tr '\n' ' '))"
 }
 
@@ -130,7 +138,14 @@ preparar () {
 }
 
 servir () {
-  [ -d "$COPIA" ] || die "no copy in $COPIA: run 'preparar' first (docker run -it … preparar)"
+  if [ ! -d "$COPIA" ]; then
+    # Sin copia no hay nada que servir. Se espera en vez de salir: en Fly la preparación se
+    # hace DENTRO de esta máquina (fly ssh console), y salir la metería en un bucle de reinicios.
+    say "no copy in $COPIA: nothing to serve. Prepare it inside this container, then restart it:"
+    say "  docker exec -it <container> /opt/demo/entrypoint.sh preparar"
+    say "  fly ssh console -C '/opt/demo/entrypoint.sh preparar'"
+    exec sleep infinity
+  fi
   permisos_data
   machine_id
   limpiar_temporales

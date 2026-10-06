@@ -20,7 +20,8 @@ import path from 'node:path'
 import { escenario, correr, startProxy, startVault, teardown, servirEstatico, tmpDir, ROOT } from './lib/harness.js'
 
 const VERBOSE = process.argv.includes('--verbose')
-const log = (m) => { if (VERBOSE) console.log(m) }
+const LOGS = VERBOSE || process.argv.includes('--logs')
+const log = (m) => { if (LOGS) console.log(m) }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 const IFRAME = path.join(ROOT, 'dotrino-identity/vault')
@@ -95,7 +96,7 @@ escenario('la máquina de prueba se enrola en la bóveda y arranca', async () =>
   const dir = tmpDir('terminal-agent')
   const qr = await vault.pair({ label: 'Máquina de prueba' })
   await enroll({ qr, dir, onChallenge: ({ code }) => { vault.waitPending().then(() => vault.approve(code)) } })
-  agente = await startAgent({ dir, shell: '/bin/sh', quiet: !VERBOSE })
+  agente = await startAgent({ dir, shell: '/bin/sh', quiet: !LOGS })
   assert.ok(agente.remote, 'con enlace, el agente atiende a los otros aparatos')
 })
 

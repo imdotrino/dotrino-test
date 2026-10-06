@@ -11,7 +11,7 @@
  *   · DISPOSITIVOS y AGENTES headless (terminal / ia / bot), que son identidades Node
  *     usando exactamente el mismo protocolo que los reales
  */
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -84,18 +84,40 @@ export async function startProxy ({ log = () => {} } = {}) {
  * local. Devuelve helpers para hablarle por el mismo channel que usa la CLI: archivos de
  * petición + señales (así el smoke ejercita el camino real, no una API interna).
  */
-export async function startVault ({ proxyUrl, name = 'vault', log = () => {} } = {}) {
-  const dir = tmpDir(name)
+export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, dir: dirDado = null, docker = null } = {}) {
+  const dir = dirDado || tmpDir(name)
   const lines = []
   // El proceso se guarda en una caja para poder REEMPLAZARLO: `restart()` levanta otro
   // sobre los mismos datos, que es como se prueba lo que la bóveda hace AL ARRANCAR.
   let child = null
+  let contenedor = null
+  let lanzadoEn = 0
   const lanzar = () => {
-    child = track(spawn(process.execPath, ['bin/dotrino-vaultd.js'], {
-      cwd: VAULT_DIR,
-      env: { ...process.env, DOTRINO_VAULT_DIR: dir, PROXY_URL: proxyUrl },
-      stdio: ['ignore', 'pipe', 'pipe']
-    }), name)
+    lanzadoEn = Date.now()
+    if (docker) {
+      // EN UN CONTENEDOR, con `docker = { machineId }`: el archivo que se monta como
+      // `/etc/machine-id`. Es lo que hace que los datos abran en un contenedor NUEVO: sin
+      // él, el material de máquina cae al hostname, que es el id del contenedor
+      // (`dotrino-vault/lib/src/kek.js`, `assertSameMachine`). `docker run` reenvía las
+      // señales, así que SIGUSR1/SIGUSR2 al proceso del CLI llegan a la bóveda.
+      contenedor = `smoke-${name}-${Date.now().toString(36)}`
+      child = track(spawn('docker', ['run', '--rm', '--name', contenedor, '--network', 'host',
+        '--user', `${process.getuid()}:${process.getgid()}`,
+        '-v', `${ROOT}:/eco:ro`, '-v', `${dir}:/data`, '-v', `${docker.machineId}:/etc/machine-id:ro`,
+        // Las dos rutas que lee la bóveda (`atrest.js`), como en un Debian con dbus: así el
+        // material es el mismo que en el host y el harness puede leer su canal cifrado.
+        '-v', `${docker.machineId}:/var/lib/dbus/machine-id:ro`,
+        '-e', 'HOME=/data', '-e', 'DOTRINO_VAULT_DIR=/data', '-e', `PROXY_URL=${proxyUrl}`,
+        '-w', '/eco/dotrino-vault', docker.image || 'node:22-bookworm-slim', 'node', 'bin/dotrino-vaultd.js'
+      ], { stdio: ['ignore', 'pipe', 'pipe'] }), name)
+      contenedores.push(contenedor)
+    } else {
+      child = track(spawn(process.execPath, ['bin/dotrino-vaultd.js'], {
+        cwd: VAULT_DIR,
+        env: { ...process.env, DOTRINO_VAULT_DIR: dir, PROXY_URL: proxyUrl },
+        stdio: ['ignore', 'pipe', 'pipe']
+      }), name)
+    }
     child.stdout.on('data', (b) => { lines.push(String(b)); log(`[${name}] ` + String(b).trim()) })
     child.stderr.on('data', (b) => { lines.push(String(b)); log(`[${name}!] ` + String(b).trim()) })
   }
@@ -112,16 +134,41 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {} } =
   let state = null
   while (Date.now() < until) {
     state = readJson(stateFile)
-    if (state?.iss) break
+    // Sobre un directorio que ya tenía datos (una copia restaurada), el `state.json` que hay
+    // es el de la bóveda ANTERIOR: solo vale el que escribió esta, que arranca después.
+    if (state?.iss && Date.parse(state.startedAt || 0) >= lanzadoEn - 2000) break
+    if (child.exitCode != null) break
+    state = null
     await sleep(200)
   }
-  if (!state?.iss) throw new Error(`la bóveda ${name} no arrancó:\n` + lines.join(''))
+  // El daemon escribe `state.json` ANTES de abrir la clave del disco: si esa clave no abre
+  // (`kek-*`), sale con código 3 justo después. Un momento de gracia para no tomarlo por vivo.
+  if (state?.iss) {
+    const t = Date.now() + 1500
+    while (Date.now() < t && child.exitCode == null) await sleep(100)
+    if (child.exitCode != null) state = null
+  }
+  if (!state?.iss) {
+    if (contenedor) spawnSync('docker', ['rm', '-f', contenedor], { stdio: 'ignore' })
+    throw Object.assign(new Error(`la bóveda ${name} no arrancó:\n` + lines.join('')), { lines })
+  }
 
   const writeReq = (file, obj) => fs.writeFileSync(path.join(dir, file), channel.encrypt(JSON.stringify(obj)), { mode: 0o600 })
   const signal = (sig) => process.kill(child.pid, sig)
 
   return {
-    dir, pid: child.pid, iss: state.iss, state,
+    dir, pid: child.pid, iss: state.iss, state, lines,
+    /**
+     * Apaga la bóveda y espera a que salga, sin volver a levantarla: así su directorio queda
+     * quieto y se puede COPIAR entero (la copia de la que restaura la demo).
+     */
+    async stop (timeoutMs = 10000) {
+      try { child.kill('SIGTERM') } catch (_) {}
+      const t = Date.now() + timeoutMs
+      while (Date.now() < t && child.exitCode == null && child.signalCode == null) await sleep(100)
+      if (contenedor) spawnSync('docker', ['rm', '-f', contenedor], { stdio: 'ignore' })
+      else try { child.kill('SIGKILL') } catch (_) {}
+    },
     /**
      * Apaga la bóveda y levanta otra sobre los MISMOS datos. Es lo que hace falta para
      * probar lo que solo pasa al arrancar (migraciones, por ejemplo). Espera a que el
@@ -226,25 +273,26 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {} } =
      * OPAQUE se termina aquí con la contraseña, y las llaves del aparato nacen aquí y viajan
      * ya cerradas. Devuelve `{ address, deviceId, caps, pub }`.
      */
-    async loginsAdd (user, password, { label = 'equipo prestado', caps = ['sign', 'read', 'store'] } = {}) {
+    /** Una orden de `dotrino-vault logins` por su canal: `list`, `close`, `remove`… */
+    async logins (op, extra = {}) {
       const salida = path.join(dir, 'logins-list.json')
-      let seq = 0
-      const pedir = async (op, extra) => {
-        try { fs.rmSync(salida, { force: true }) } catch (_) {}
-        const id = `smoke-${++seq}`
-        writeReq('logins-request.json', { op, id, ...extra })
-        signal('SIGUSR2')
-        const t = Date.now() + 15000
-        while (Date.now() < t) {
-          const d = readJson(salida)
-          if (d?.at && (!d.req || d.req === id)) {
-            if (d.ok === false) throw Object.assign(new Error(`logins ${op}: ${d.error}`), { code: d.code })
-            return d
-          }
-          await sleep(100)
+      try { fs.rmSync(salida, { force: true }) } catch (_) {}
+      const id = `smoke-${op}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+      writeReq('logins-request.json', { op, id, ...extra })
+      signal('SIGUSR2')
+      const t = Date.now() + 15000
+      while (Date.now() < t) {
+        const d = readJson(salida)
+        if (d?.at && (!d.req || d.req === id)) {
+          if (d.ok === false) throw Object.assign(new Error(`logins ${op}: ${d.error}`), { code: d.code })
+          return d
         }
-        throw new Error(`la bóveda no contestó a «logins ${op}»`)
+        await sleep(100)
       }
+      throw new Error(`la bóveda no contestó a «logins ${op}»`)
+    },
+    async loginsAdd (user, password, { label = 'equipo prestado', caps = ['sign', 'read', 'store'] } = {}) {
+      const pedir = (op, extra) => this.logins(op, extra)
       const { client: opaque } = await import(path.join(VAULT_DIR, 'node_modules/@dotrino/opaque/src/index.js'))
       const { makeDeviceKey, makeDeviceEncKey } = await import(path.join(VAULT_DIR, 'node_modules/@dotrino/identity/vault/capabilities.js'))
       const { sealDeviceKeys, loginAddress } = await import(path.join(VAULT_DIR, 'lib/src/passwordLogins.js'))
@@ -392,6 +440,7 @@ export async function servirEstatico (raiz, { spa = false } = {}) {
 }
 
 const servidores = []
+const contenedores = []
 
 /** Mata todo lo levantado y borra los directorios temporales. */
 export async function teardown () {
@@ -402,6 +451,7 @@ export async function teardown () {
   for (const d of dirs) { try { fs.rmSync(d, { recursive: true, force: true }) } catch (_) {} }
   dirs.length = 0
   for (const s of servidores.splice(0)) { try { s.close() } catch (_) {} }
+  for (const c of contenedores.splice(0)) spawnSync('docker', ['rm', '-f', c], { stdio: 'ignore' })
 }
 
 // ----- runner mínimo (sin dependencias: esto tiene que correr en cualquier lado) -----

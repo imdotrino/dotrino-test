@@ -29,7 +29,8 @@
     "smoke:llave-del-chip": "node smoke/llave-del-chip.mjs",
     "smoke:aprobador-navegador": "node smoke/aprobador-navegador.mjs",
     "smoke:terminal-panel": "node smoke/terminal-panel.mjs",
-    "smoke:demo-terminal": "node smoke/demo-terminal.mjs"
+    "smoke:demo-terminal": "node smoke/demo-terminal.mjs",
+    "smoke:demo-restaurar": "node smoke/demo-restaurar.mjs"
   },
   "devDependencies": {
     "@vitejs/plugin-basic-ssl": "2.3.0",

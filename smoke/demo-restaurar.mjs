@@ -24,6 +24,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { escenario, correr, startProxy, startVault, teardown, servirEstatico, tmpDir, ROOT } from './lib/harness.js'
 import { dockerDisponible } from './lib/caja.js'
+import { servirPaginaDeEntrar, entrar as entrarCon } from './lib/entrar.js'
 
 const VERBOSE = process.argv.includes('--verbose')
 const LOGS = VERBOSE || process.argv.includes('--logs')
@@ -31,7 +32,6 @@ const log = (m) => { if (LOGS) console.log(m) }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 const IFRAME = path.join(ROOT, 'dotrino-identity/vault')
-const IDENTITY = path.join(ROOT, 'dotrino-identity')
 const PWA = path.join(ROOT, 'dotrino-terminal/dist')
 const AGENTE = path.join(ROOT, 'dotrino-terminal/agent')
 
@@ -70,35 +70,7 @@ async function esperar (fn, { timeoutMs = 20000, que = 'la condición' } = {}) {
   throw new Error('se agotó la espera de ' + que)
 }
 
-/** Lo mismo que `profile.dotrino.com/login`, sobre el pilar (ver `demo-terminal.mjs`). */
-function paginaDeEntrar () {
-  const dir = tmpDir('entrar')
-  fs.symlinkSync(path.join(IDENTITY, 'src'), path.join(dir, 'src'))
-  fs.symlinkSync(path.join(IDENTITY, 'vault'), path.join(dir, 'vault'))
-  fs.writeFileSync(path.join(dir, 'index.html'), `<!doctype html><meta charset="utf-8">
-<script type="module">
-  import { Identity } from './src/index.js'
-  const q = new URLSearchParams(location.search)
-  window.entrar = async (address, password) => {
-    const id = await Identity.connect({ vaultUrl: q.get('vault'), promptUnlock: false })
-    try {
-      await id.loginWithPassword({ address, password, remember: true, label: 'smoke', proxyUrl: q.get('proxy') })
-      return { ok: true }
-    } catch (e) { return { ok: false, code: e?.code || null, message: String(e?.message || e) } }
-  }
-  window.listo = true
-</script>`)
-  return dir
-}
-
-async function entrar (contexto) {
-  const p = await contexto.newPage()
-  await p.goto(`${webEntrar.url}/?vault=${encodeURIComponent(iframeUrl())}&proxy=${encodeURIComponent(proxy.url)}`)
-  await p.waitForFunction(() => window.listo)
-  const r = await p.evaluate(([a, c]) => window.entrar(a, c), [direccion, CLAVE])
-  await p.close()
-  return r
-}
+const entrar = (contexto) => entrarCon(contexto, { paginaUrl: webEntrar.url, iframeUrl: iframeUrl(), proxyUrl: proxy.url, address: direccion, password: CLAVE })
 
 /** Abre la PWA, entra en la máquina y comprueba que la shell contesta. */
 async function abrirShell (contexto, { timeoutMs = 45000 } = {}) {
@@ -238,7 +210,7 @@ try {
   const { chromium } = await import('playwright')
   proxy = await startProxy({ log })
   webIframe = await servirEstatico(IFRAME)
-  webEntrar = await servirEstatico(paginaDeEntrar())
+  webEntrar = await servirPaginaDeEntrar()
   webPwa = await servirEstatico(PWA, { spa: true })
   navegador = await chromium.launch({ headless: !VERBOSE })
   const ok = await correr()

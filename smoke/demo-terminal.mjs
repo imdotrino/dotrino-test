@@ -18,6 +18,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { escenario, correr, startProxy, startVault, teardown, servirEstatico, tmpDir, ROOT } from './lib/harness.js'
+import { servirPaginaDeEntrar, entrar } from './lib/entrar.js'
 
 const VERBOSE = process.argv.includes('--verbose')
 const LOGS = VERBOSE || process.argv.includes('--logs')
@@ -25,7 +26,6 @@ const log = (m) => { if (LOGS) console.log(m) }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 const IFRAME = path.join(ROOT, 'dotrino-identity/vault')
-const CLIENTE = path.join(ROOT, 'dotrino-identity')
 const PWA = path.join(ROOT, 'dotrino-terminal/dist')
 const AGENTE = path.join(ROOT, 'dotrino-terminal/agent')
 
@@ -54,31 +54,7 @@ async function esperar (fn, { timeoutMs = 20000, que = 'la condición' } = {}) {
   throw new Error('se agotó la espera de ' + que)
 }
 
-/**
- * Una página mínima que hace lo que hace `profile.dotrino.com/login`: `Identity.connect()` y
- * `loginWithPassword`. No se usa la de profile-app porque esa apunta a `id.dotrino.com` sin
- * forma de cambiarlo; lo que se prueba es el pilar, que es el mismo en las dos.
- */
-function paginaDeEntrar () {
-  const dir = tmpDir('entrar')
-  // El cliente importa `../vault/…`: se sirve el paquete tal cual, con enlaces, no una copia.
-  fs.symlinkSync(path.join(CLIENTE, 'src'), path.join(dir, 'src'))
-  fs.symlinkSync(path.join(CLIENTE, 'vault'), path.join(dir, 'vault'))
-  fs.writeFileSync(path.join(dir, 'index.html'), `<!doctype html><meta charset="utf-8">
-<script type="module">
-  import { Identity } from './src/index.js'
-  const q = new URLSearchParams(location.search)
-  window.entrar = async (address, password) => {
-    const id = await Identity.connect({ vaultUrl: q.get('vault'), promptUnlock: false })
-    try {
-      await id.loginWithPassword({ address, password, remember: true, label: 'smoke', proxyUrl: q.get('proxy') })
-      return { ok: true }
-    } catch (e) { return { ok: false, code: e?.code || null, message: String(e?.message || e) } }
-  }
-  window.listo = true
-</script>`)
-  return dir
-}
+const datosEntrar = (password) => ({ paginaUrl: webEntrar.url, iframeUrl: iframeUrl(), proxyUrl: proxy.url, address: cuenta.address, password })
 
 async function maquinasVisibles (pagina) {
   return pagina.locator('[data-testid="machine-item"]').count()
@@ -109,25 +85,14 @@ escenario('sin haber entrado, la terminal pide elegir dónde vive la identidad',
 })
 
 escenario('con la contraseña equivocada no entra, y lo dice por su código', async () => {
-  const pagina = await contexto.newPage()
-  pagina.on('console', (m) => log('[entrar] ' + m.text()))
-  await pagina.goto(`${webEntrar.url}/?vault=${encodeURIComponent(iframeUrl())}&proxy=${encodeURIComponent(proxy.url)}`)
-  await pagina.waitForFunction(() => window.listo)
-  const r = await pagina.evaluate(([a]) => window.entrar(a, 'no-es-esta-contrasena'), [cuenta.address])
+  const r = await entrar(contexto, datosEntrar('no-es-esta-contrasena'))
   assert.equal(r.ok, false, 'no entra')
   assert.equal(r.code, 'login-failed', 'y el código es el de la contraseña: ' + JSON.stringify(r))
-  await pagina.close()
 })
 
 escenario('el tester entra con su dirección y su contraseña', async () => {
-  const pagina = await contexto.newPage()
-  pagina.on('console', (m) => log('[entrar] ' + m.text()))
-  pagina.on('pageerror', (e) => log('[entrar!] ' + e.message))
-  await pagina.goto(`${webEntrar.url}/?vault=${encodeURIComponent(iframeUrl())}&proxy=${encodeURIComponent(proxy.url)}`)
-  await pagina.waitForFunction(() => window.listo)
-  const r = await pagina.evaluate(([a, c]) => window.entrar(a, c), [cuenta.address, CLAVE])
+  const r = await entrar(contexto, datosEntrar(CLAVE))
   assert.ok(r.ok, 'entra: ' + JSON.stringify(r))
-  await pagina.close()
 })
 
 escenario('y la terminal encuentra la máquina y le abre una shell', async () => {
@@ -156,7 +121,7 @@ try {
   proxy = await startProxy({ log })
   vault = await startVault({ proxyUrl: proxy.url, name: 'boveda', log })
   webIframe = await servirEstatico(IFRAME)
-  webEntrar = await servirEstatico(paginaDeEntrar())
+  webEntrar = await servirPaginaDeEntrar()
   webPwa = await servirEstatico(PWA, { spa: true })
   console.log(`  proxy  ${proxy.url}`)
   console.log(`  pwa    ${webPwa.url}/consoles\n`)

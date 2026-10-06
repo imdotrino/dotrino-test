@@ -8,6 +8,7 @@
  *   · «+» abre otra y clic en un número cambia a esa, por la misma conexión;
  *   · el TAMAÑO con tres a la vez: lo tiene quien lo fija (⤢) o el último que llegó; escribir no
  *     lo cambia; la pantalla fijada se sigue al redimensionarse, y al soltarla vuelve al último;
+ *   · ACTIVIDAD: el número de una consola cambia de color si está trabajando o si terminó;
  *   · la × de la consola de esta pestaña pasa primero a otra.
  *
  *   npm run smoke:terminal-panel
@@ -116,6 +117,26 @@ escenario('«+» abre otra; clic en un número cambia a esa por la misma conexi�
   assert.equal((await consolas()).find((c) => c.n === 2).viewers, 0, 'y ahora la suelta es la 2')
   // SMOKE_SHOT=<ruta.png>: una captura de la pantalla de consolas, para mirarla.
   if (process.env.SMOKE_SHOT) await pagina.screenshot({ path: process.env.SMOKE_SHOT })
+})
+
+escenario('ACTIVIDAD: el panel dice qué consola está trabajando y cuál terminó', async () => {
+  const { connectLocal } = await import(path.join(AGENTE, 'local.js'))
+  const dos = (await consolas()).find((c) => c.n === 2)
+  // Otra pantalla lanza en la 2 algo que se anuncia como un agente: ◐ en el título mientras
+  // trabaja (Claude; Codex usa un giro braille) y ✳ al terminar.
+  const v = await connectLocal(dirAgente)
+  v.send({ type: 'attach', id: dos.id, cols: 80, rows: 24, tag: 'otra' })
+  await sleep(400)
+  v.send({ type: 'input', data: "printf '\\033]0;\\342\\227\\220 tarea\\007'; sleep 4; printf '\\033]0;\\342\\234\\263 tarea\\007'\r" })
+  const dosBtn = pagina.locator('.side .sbtn.num', { hasText: /^2$/ })
+  await esperar(async () => (await dosBtn.getAttribute('class')).includes('busy'), { que: 'que el 2 se vea trabajando' })
+  if (process.env.SMOKE_SHOT) await pagina.screenshot({ path: process.env.SMOKE_SHOT.replace(/\.png$/, '-actividad.png') })
+  await esperar(async () => (await dosBtn.getAttribute('class')).includes('done'), { que: 'que el 2 se vea terminado' })
+  // Atenderla (teclear en ella) apaga el aviso.
+  v.send({ type: 'input', data: ' ' })
+  await esperar(async () => !/busy|done/.test(await dosBtn.getAttribute('class')), { que: 'que al atenderla se apague' })
+  v.send({ type: 'detach' }); v.close()
+  await esperar(async () => (await consolas()).find((c) => c.n === 2).viewers === 0, { que: 'que la 2 quede suelta' })
 })
 
 escenario('el TAMAÑO con tres a la vez: lo tiene quien lo fija (⤢) o el último que llegó; escribir no lo cambia', async () => {

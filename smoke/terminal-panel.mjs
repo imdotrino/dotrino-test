@@ -119,6 +119,32 @@ escenario('«+» abre otra; clic en un número cambia a esa por la misma conexi�
   if (process.env.SMOKE_SHOT) await pagina.screenshot({ path: process.env.SMOKE_SHOT })
 })
 
+// SIEMPRE EL CAMINO MÁS DIRECTO (CLAUDE.md, regla del transporte). El saludo sale por el
+// proxio, que es lo que hay; a partir de ahí lo de la consola va por el canal directo. Se
+// mide en la página con las estadísticas del pilar, que cuentan los bytes por el camino por
+// el que pasaron de verdad.
+escenario('lo de la consola va por el canal directo, no por el proxio', async () => {
+  const medir = () => pagina.evaluate(async () => {
+    const out = []
+    for (const c of globalThis[Symbol.for('dotrino.transports')] || []) {
+      for (const p of (await c.stats()).peers) out.push({ route: p.route, bytesIn: p.bytesIn, bytesOut: p.bytesOut })
+    }
+    return out
+  })
+  const suma = (ps, dir, camino) => ps.reduce((n, p) => n + (p[dir][camino] || 0), 0)
+  await esperar(async () => (await medir()).some((p) => p.route === 'direct'), { timeoutMs: 30000, que: 'que se abra el canal directo con el agente' })
+  const antes = await medir()
+  await pagina.locator('.xterm-helper-textarea').first().focus()
+  await pagina.keyboard.type('seq 1 400\n')
+  await esperar(async () => suma(await medir(), 'bytesIn', 'direct') > suma(antes, 'bytesIn', 'direct') + 1000, { que: 'que la salida de la consola llegue por el canal directo' })
+  const despues = await medir()
+  log('  antes   ' + JSON.stringify(antes))
+  log('  después ' + JSON.stringify(despues))
+  assert.ok(suma(despues, 'bytesOut', 'direct') > suma(antes, 'bytesOut', 'direct'), 'lo que se teclea sale por el canal directo')
+  assert.equal(suma(despues, 'bytesOut', 'proxy'), suma(antes, 'bytesOut', 'proxy'), 'y nada de eso sale por el proxio')
+  assert.equal(suma(despues, 'bytesIn', 'proxy'), suma(antes, 'bytesIn', 'proxy'), 'ni entra por él')
+})
+
 escenario('ACTIVIDAD: el panel dice qué consola está trabajando y cuál terminó', async () => {
   const { connectLocal } = await import(path.join(AGENTE, 'local.js'))
   const dos = (await consolas()).find((c) => c.n === 2)

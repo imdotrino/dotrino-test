@@ -1,5 +1,5 @@
 /**
- * smoke:actualizacion — LA BÓVEDA SE ACTUALIZA SOLA, CON Y SIN APROBADOR (vaultd ≥ 0.131.2).
+ * smoke:actualizacion — LA BÓVEDA SE ACTUALIZA SOLA, Y PIDE PERMISO SI SE ENCIENDE EL AJUSTE (vaultd ≥ 0.146.0).
  *
  * Contra el release REAL de GitHub y la atestación REAL de sigstore: nada simulado en el
  * camino que importa. La caja hace de máquina con instalación de usuario
@@ -7,9 +7,10 @@
  * `INVOCATION_ID` para que el daemon sepa que alguien lo levanta), y el binario de prueba se
  * presenta como 0.131.2 para que la última publicada le parezca nueva.
  *
- *   1. SIN aprobadores: instala sola y se reinicia EN EL ACTO (no a los ~2 min del vigilante).
- *   2. CON un aprobador que es un NAVEGADOR (no un teléfono): pide permiso, el navegador lo ve
- *      como «actualizarse», lo aprueba, y entonces instala y se reinicia.
+ *   1. POR DEFECTO: instala sola y se reinicia EN EL ACTO (no a los ~2 min del vigilante).
+ *   2. CON EL AJUSTE ENCENDIDO (`update --approval on`) y un aprobador que es un NAVEGADOR (no
+ *      un teléfono): pide permiso, el navegador lo ve como «actualizarse», lo aprueba, y
+ *      entonces instala y se reinicia.
  *
  * Necesita red hacia GitHub. `dotrino-vault/dist/` tiene que traer los dos binarios:
  * `dotrino-vaultd` (el código actual con su versión) y `dotrino-vaultd-viejo` (el mismo código
@@ -81,7 +82,7 @@ escenario('el release publicado se puede leer (la prueba necesita red hacia GitH
   log('[release] última publicada: ' + publicada)
 })
 
-escenario('SIN aprobadores: se actualiza sola y se reinicia EN EL ACTO', async () => {
+escenario('POR DEFECTO: se actualiza sola y se reinicia EN EL ACTO', async () => {
   const m = maquina('upd-sola', '/data/sola')
   m.poner('dotrino-vaultd-viejo')
   m.arrancar()
@@ -95,7 +96,7 @@ escenario('SIN aprobadores: se actualiza sola y se reinicia EN EL ACTO', async (
   await esperar(() => m.version() === publicada && !/corre la versi/.test(m.ctl('status')), { timeoutMs: 60000, que: `que corra la ${publicada}` })
 })
 
-escenario('CON un aprobador que es un NAVEGADOR: pide permiso, se aprueba desde el navegador, y entonces se actualiza', async () => {
+escenario('CON EL AJUSTE ENCENDIDO y un aprobador que es un NAVEGADOR: pide permiso, se aprueba desde el navegador, y entonces se actualiza', async () => {
   const m = maquina('upd-aprobada', '/data/aprobada')
   // Primero con la versión al día, para que no se actualice antes de tener aprobador.
   m.poner('dotrino-vaultd')
@@ -147,11 +148,14 @@ escenario('CON un aprobador que es un NAVEGADOR: pide permiso, se aprueba desde 
   assert.match(m.ctl('members'), new RegExp(id), 'el navegador aparece entre los miembros')
   m.ctl(`caps ${id} +aprueba`)
   log('[aprobador] ' + id + ' ' + pub.slice(0, 40))
+  // Pedir permiso es un ajuste, apagado por defecto: sin encenderlo se actualizaría sola.
+  assert.match(m.ctl('update --approval on'), /pide aprobaci[oó]n/, 'el ajuste queda encendido')
+  assert.match(m.ctl('status'), /actualizar\s*:\s*pide aprobaci[oó]n/, 'y `status` lo dice')
 
   // Ahora sí: el binario anterior. El vigilante lo nota (~2 min) y reinicia; al arrancar ve la
-  // versión nueva y, como hay aprobador, pide.
+  // versión nueva y, como el ajuste está encendido y hay aprobador, pide.
   m.poner('dotrino-vaultd-viejo')
-  await esperar(() => m.linea(/asking one of 1 approver/), { timeoutMs: 240000, que: 'que pida permiso al aprobador' })
+  await esperar(() => m.linea(/asking .*approver/), { timeoutMs: 240000, que: 'que pida permiso al aprobador' })
   assert.equal(m.linea(/installed · restarting now/), undefined, 'no instala nada sin el sí')
   await esperar(() => aprobo, { timeoutMs: 120000, que: 'que el navegador vea el pedido' })
   assert.equal(aprobo.kind, 'update', 'el navegador lo ve como una actualización, no como un pedido de claves')

@@ -119,12 +119,16 @@ async function restaurar (nombre) {
   await arrancarMaquina(dirMaquina)
 }
 
-async function apagar () {
+async function apagarMaquina () {
   if (agente && agente.exitCode == null) {
     agente.kill('SIGTERM')
     await new Promise((r) => agente.once('exit', r))
   }
   agente = null
+}
+
+async function apagar () {
+  await apagarMaquina()
   await vault?.stop()
   vault = null
 }
@@ -189,6 +193,38 @@ escenario('el teléfono que entró ANTES del reset: o sigue, o vuelve a entrar c
   const r = await entrar(telefono)
   assert.ok(r.ok, 'vuelve a entrar: ' + JSON.stringify(r))
   await abrirShell(telefono)
+})
+
+escenario('con la pestaña ABIERTA, la máquina se reinicia y la pestaña se recupera sola', async () => {
+  // Las sesiones viven en la memoria del agente: al reiniciarse (cada reset de la demo) deja de
+  // conocerlas. La pestaña tiene que volver a saludar y seguir, no quedarse en «sesión
+  // desconocida o expirada» (el fallo que se vio en la demo de Timone el 2026-10-06).
+  const p = await telefono.newPage()
+  p.on('console', (m) => log('[pwa] ' + m.text()))
+  await p.setViewportSize({ width: 900, height: 700 })
+  await p.goto(`${webPwa.url}/consoles?vault=${encodeURIComponent(iframeUrl())}`)
+  const pantalla = () => p.locator('.xterm-rows').first().innerText()
+  const escribir = async (orden) => { await p.locator('.xterm-helper-textarea').first().focus(); await p.keyboard.type(orden + '\n') }
+  try {
+    await p.locator('[data-testid="machine-item"]').first().click({ timeout: 45000 })
+    await p.locator('.xterm-helper-textarea').first().waitFor({ state: 'attached', timeout: 20000 })
+    await sleep(1500)
+    await escribir('echo antes-$((1+1))')
+    await esperar(async () => (await pantalla()).includes('antes-2'), { que: 'la shell antes del reinicio' })
+    // Reinicio de la máquina con la pestaña abierta.
+    const dirMaquina = agente.spawnargs[agente.spawnargs.indexOf('--dir') + 1]
+    await apagarMaquina()
+    await arrancarMaquina(dirMaquina)
+    // La primera tecla tras el reinicio es la que descubre que la sesión ya no existe.
+    await escribir('')
+    await esperar(async () => (await p.locator('body').innerText()).includes('ya no existe') || (await p.locator('body').innerText()).includes('no longer'), { timeoutMs: 30000, que: 'el aviso de que la consola ya no existe' })
+    await escribir('echo despues-$((2+2))')
+    await esperar(async () => (await pantalla()).includes('despues-4'), { que: 'la shell DESPUÉS del reinicio, en la misma pestaña' })
+    assert.doesNotMatch(await p.locator('#hint').innerText(), /desconocida|unknown/i, 'sin el error de sesión desconocida')
+  } catch (e) {
+    if (LOGS) console.log('[pantalla]\n' + (await p.locator('body').innerText().catch(() => '')).slice(-1500))
+    throw e
+  } finally { await p.close() }
 })
 
 escenario('con OTRO machine-id la copia no abre, y lo dice: el machine-id fijo es lo que la hace portátil', async () => {

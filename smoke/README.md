@@ -215,3 +215,43 @@ la identidad de nadie a un origen ajeno.
 ## Pendiente
 
 - Traspaso del master y master obsoleto (restaurar un respaldo de la bóveda).
+
+## terminal-rpm y terminal-vm: la terminal como la instala alguien de verdad
+
+`terminal-otras-maquinas` corre el código del repo. Estas dos corren **lo publicado** (el `.rpm`
+de la release y `@dotrino/terminal-agent` de npm), que es lo que tiene quien se queja.
+
+- **`npm run smoke:terminal-rpm`** — una caja de Fedora con el `.rpm`, el cliente y una pantalla
+  (Xvfb). Comprueba que el cliente ve la otra máquina, que la app abre y pinta el panel, y que
+  sin enlazar dice por qué. Deja capturas en `--out`. La imagen se construye una vez:
+
+  ```bash
+  podman build -t dotrino-terminal-rpm - <<'EOF'
+  FROM registry.fedoraproject.org/fedora:latest
+  RUN dnf -y -q install nodejs npm xorg-x11-server-Xvfb mesa-vulkan-drivers ImageMagick xdotool procps-ng dejavu-sans-mono-fonts
+  RUN dnf -y install https://github.com/imdotrino/dotrino-terminal/releases/download/desktop-v<VER>/dotrino-terminal-desktop-<VER>-1.x86_64.rpm
+  RUN npm install -g @dotrino/terminal-agent@latest && useradd -m u
+  EOF
+  ```
+
+  Las librerías gráficas las tiene que traer el `.rpm`: no se instalan a mano en la imagen. Así
+  se vio que hasta la 0.2.47 el paquete no las declaraba y la app no abría en un Fedora mínimo.
+
+- **`npm run smoke:terminal-vm`** — una VM de Fedora limpia (KVM), para lo que una caja no
+  prueba: el instalador universal sin Node, `sudo dnf`, `desktop update` de una versión a la
+  siguiente, `service install` y **un reinicio** tras el que la otra máquina la ve sin que
+  nadie inicie sesión. La VM se levanta aparte, de la imagen Cloud de Fedora con un usuario
+  `tester` (sudo sin contraseña, llave SSH por cloud-init) y su SSH en un puerto del host:
+
+  ```bash
+  qemu-img create -f qcow2 -F qcow2 -b Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2 disk.qcow2 20G
+  qemu-system-x86_64 -enable-kvm -cpu host -smp 4 -m 4096 -display none \
+    -drive file=disk.qcow2,if=virtio -drive file=seed.iso,media=cdrom \
+    -nic user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:2247-:22
+  node smoke/terminal-vm.mjs --ssh-port 2247 --key ./key --out /tmp/capturas
+  ```
+
+  La prueba empieza exigiendo una VM limpia: se corre sobre un disco recién creado.
+
+`terminal-otras-maquinas --b-agent <carpeta>` pone en la máquina vista otra versión del agente
+(una ya publicada, instalada en esa carpeta): la que mira necesita la 0.38, la vista no.

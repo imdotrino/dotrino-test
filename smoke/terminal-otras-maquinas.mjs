@@ -18,6 +18,11 @@ const VERBOSE = process.argv.includes('--verbose')
 const log = (m) => { if (VERBOSE) console.log(m) }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const AGENTE = path.join(ROOT, 'dotrino-terminal/agent')
+// `--b-agent <carpeta>`: la máquina B corre OTRA versión del agente (una ya publicada, instalada
+// en esa carpeta). La norma es que solo la máquina que MIRA necesita la versión nueva: las
+// vistas pueden llevar meses sin actualizarse, y eso es lo que hay en la calle.
+const iB = process.argv.indexOf('--b-agent')
+const AGENTE_B = iB > 0 ? path.resolve(process.argv[iB + 1]) : AGENTE
 
 let proxy = null
 let vault = null
@@ -38,7 +43,7 @@ async function levantar (nombre) {
   const dir = tmpDir('ta-' + nombre)
   const qr = await vault.pair({ label: nombre })
   await enroll({ qr, dir, onChallenge: ({ code }) => { vault.waitPending().then(() => vault.approve(code)) } })
-  const proc = spawn(process.execPath, [path.join(AGENTE, 'bin/cli.js'), '--dir', dir, '--shell', '/bin/sh'], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, SHELL: '/bin/sh' } })
+  const proc = spawn(process.execPath, [path.join(nombre === 'b' ? AGENTE_B : AGENTE, 'bin/cli.js'), '--dir', dir, '--shell', '/bin/sh'], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, SHELL: '/bin/sh' } })
   let salida = ''
   proc.stdout.on('data', (d) => { salida += d; log(`[${nombre}] ${String(d).trimEnd()}`) })
   proc.stderr.on('data', (d) => { salida += d; log(`[${nombre}!] ${String(d).trimEnd()}`) })
@@ -125,6 +130,30 @@ escenario('B sigue atendiendo a los demás: A no le quitó nada al conectarse co
   await esperar(() => got.find((m) => m.type === 'attached' || m.type === 'fail'), { que: 'que B abra una consola en A' })
   assert.equal(got.find((m) => m.type === 'fail'), undefined, JSON.stringify(got.find((m) => m.type === 'fail')))
   c.close()
+})
+
+escenario('con la bóveda apagada y sin acta guardada, una máquina nueva DICE que no pudo preguntar', async () => {
+  // Lo que pasaba: contestaba una lista vacía, igual que si no hubiera otras máquinas.
+  const { enroll } = await import(path.join(AGENTE, 'link.js'))
+  const { connectLocal } = await import(path.join(AGENTE, 'local.js'))
+  const dir = tmpDir('ta-c')
+  const qr = await vault.pair({ label: 'c' })
+  await enroll({ qr, dir, onChallenge: ({ code }) => { vault.waitPending().then(() => vault.approve(code)) } })
+  await vault.stop()
+  const proc = spawn(process.execPath, [path.join(AGENTE, 'bin/cli.js'), '--dir', dir, '--shell', '/bin/sh'], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, SHELL: '/bin/sh' } })
+  let salida = ''
+  proc.stdout.on('data', (d) => { salida += d })
+  proc.stderr.on('data', (d) => { salida += d })
+  maquinas.c = { dir, proc }
+  await esperar(() => /agente activo/.test(salida), { que: `que arranque el agente c\n${salida}` })
+  const c = await connectLocal(dir)
+  const got = []
+  c.on('message', (m) => got.push(m))
+  c.send({ type: 'machines' })
+  const r = await esperar(() => got.find((m) => m.type === 'machines' || m.type === 'fail'), { timeoutMs: 60000, que: 'la respuesta' })
+  c.close()
+  assert.equal(r.type, 'fail', 'contestó una lista: ' + JSON.stringify(r))
+  assert.equal(r.code, 'no-acta', JSON.stringify(r))
 })
 
 console.log('\nSMOKE · las consolas de otra máquina desde una ventana de esta, todo en local\n')

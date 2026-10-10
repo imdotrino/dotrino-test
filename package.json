@@ -31,6 +31,8 @@
     "smoke:aprobador-navegador": "node smoke/aprobador-navegador.mjs",
     "smoke:terminal-panel": "node smoke/terminal-panel.mjs",
     "smoke:terminal-otras-maquinas": "node smoke/terminal-otras-maquinas.mjs",
+    "smoke:terminal-rpm": "node smoke/terminal-rpm.mjs",
+    "smoke:terminal-vm": "node smoke/terminal-vm.mjs",
     "smoke:demo-terminal": "node smoke/demo-terminal.mjs",
     "smoke:demo-restaurar": "node smoke/demo-restaurar.mjs"
   },

@@ -10,6 +10,7 @@
  *   node smoke/terminal-otras-maquinas.mjs --verbose
  */
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { escenario, correr, startProxy, startVault, teardown, tmpDir, ROOT } from './lib/harness.js'
@@ -154,6 +155,30 @@ escenario('con la bóveda apagada y sin acta guardada, una máquina nueva DICE q
   c.close()
   assert.equal(r.type, 'fail', 'contestó una lista: ' + JSON.stringify(r))
   assert.equal(r.code, 'no-acta', JSON.stringify(r))
+})
+
+escenario('una máquina enlazada SIN RED abre igual sus consolas locales', async () => {
+  // Lo que pasaba: el agente moría al no llegar al proxio, y no se abría ni una consola de aquí.
+  const { connectLocal } = await import(path.join(AGENTE, 'local.js'))
+  const dir = tmpDir('ta-sinred')
+  fs.cpSync(maquinas.a.dir, dir, { recursive: true })
+  for (const f of ['agent.pid', 'terminal.sock']) fs.rmSync(path.join(dir, f), { force: true })
+  const link = JSON.parse(fs.readFileSync(path.join(dir, 'link.json'), 'utf8'))
+  link.proxy = 'ws://127.0.0.1:1'                                  // nadie escucha ahí
+  fs.writeFileSync(path.join(dir, 'link.json'), JSON.stringify(link))
+  const proc = spawn(process.execPath, [path.join(AGENTE, 'bin/cli.js'), '--dir', dir, '--shell', '/bin/sh'], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, SHELL: '/bin/sh' } })
+  let salida = ''
+  proc.stdout.on('data', (d) => { salida += d })
+  proc.stderr.on('data', (d) => { salida += d })
+  maquinas.sinred = { dir, proc }
+  await esperar(() => /agente activo/.test(salida), { timeoutMs: 40000, que: `que el agente arranque sin red\n${salida}` })
+  assert.match(salida, /local windows work/, 'no dijo que la parte remota no arrancó')
+  const c = await connectLocal(dir)
+  const got = []
+  c.on('message', (m) => got.push(m))
+  c.send({ type: 'open', cols: 80, rows: 24 })
+  await esperar(() => got.find((m) => m.type === 'attached'), { que: 'abrir una consola local sin red' })
+  c.close()
 })
 
 console.log('\nSMOKE · las consolas de otra máquina desde una ventana de esta, todo en local\n')

@@ -27,6 +27,8 @@ const AGENTE = path.join(ROOT, 'dotrino-terminal/agent')
 const AGENTE_B = arg('--b-agent') ? path.resolve(arg('--b-agent')) : AGENTE
 const IMAGEN = process.env.SMOKE_RPM_IMAGE || 'dotrino-terminal-rpm'
 const OUT = path.resolve(arg('--out') || tmpDir('rpm-capturas'))
+// `--app <binario>`: la app compilada en este repo, en vez de la que trae el .rpm.
+const APP = arg('--app') ? path.resolve(arg('--app')) : null
 const CAJA = `smoke-terminal-rpm-${Date.now().toString(36)}`
 const PERFIL = '/home/u/.dotrino/agent/terminal-agent'
 
@@ -90,6 +92,7 @@ escenario('la caja de Fedora arranca con el .rpm y el cliente de npm', async () 
   const r = pod(['run', '-d', '--rm', '--network', 'host', '--name', CAJA, IMAGEN, 'sleep', 'infinity'])
   assert.equal(r.status, 0, `falta la imagen ${IMAGEN}? ${r.stderr}`)
   enCaja('mkdir -p /tmp/run-u && chown u:u /tmp/run-u && chmod 700 /tmp/run-u', { root: true })
+  if (APP) assert.equal(pod(['cp', APP, `${CAJA}:/usr/bin/dotrino-terminal-desktop`]).status, 0, 'no se pudo poner la app')
   enCaja('(nohup Xvfb :9 -screen 0 1280x800x24 >/tmp/xvfb.log 2>&1 &)', { root: true })
   const v = enCaja('rpm -q dotrino-terminal-desktop; npm ls -g 2>/dev/null | grep terminal-agent').stdout
   console.log('    ' + v.trim().replace(/\n/g, '\n    '))
@@ -155,6 +158,44 @@ escenario('ENLAZADA: la app pinta la otra máquina en el panel (plegado y abiert
     setTimeout(() => process.exit(0), 5000)'`).stdout
   assert.match(estado, /"name":"escritorio"/, estado)
   console.log('    registro de la app:\n      ' + enCaja('cat /tmp/app.log ~/.config/dotrino-terminal/desktop.log 2>/dev/null | tail -8').stdout.trim().replace(/\n/g, '\n      '))
+})
+
+escenario('una consola de la OTRA máquina abre en ESTA ventana, y se vuelve a la de aquí igual', async () => {
+  const ventanas = () => enCaja('xdotool search --onlyvisible --class dotrino 2>/dev/null | wc -l').stdout.trim()
+  const antes = ventanas()
+  // El panel está abierto: la consola de «escritorio» es la fila bajo su nombre.
+  enCaja('xdotool mousemove 70 245 click 1')
+  await sleep(6000)
+  console.log('    captura: ' + captura('3-remota-en-esta-ventana'))
+  assert.equal(ventanas(), antes, 'se abrió otra ventana')
+  // La shell que contesta es la de la otra máquina: su carpeta de perfil no es la de la caja.
+  enCaja('xdotool windowfocus $(xdotool search --onlyvisible --class dotrino | head -1); xdotool mousemove 600 300 click 1; sleep 1; xdotool type --delay 40 \'echo DIR=$DOTRINO_TERMINAL_PROFILE_DIR\'; xdotool key Return')
+  await sleep(2500)
+  console.log('    captura: ' + captura('4-remota-escribiendo'))
+  const lista = async () => { const { connectLocal } = await import(path.join(AGENTE, 'local.js')); const c = await connectLocal(b.dir); const r = await new Promise((res) => { c.on('message', (m) => { if (m.type === 'consoles') res(m.list) }); c.send({ type: 'list' }) }); c.close(); return r }
+  const enB = await lista()
+  // Lo tecleado en la ventana llegó a la shell de la otra máquina, y la consola tomó el tamaño
+  // de esta ventana, como cualquier consola que se pone en pantalla.
+  const { connectLocal: cl } = await import(path.join(AGENTE, 'local.js'))
+  const espia = await cl(b.dir)
+  const visto = []
+  espia.on('message', (m) => visto.push(m))
+  espia.send({ type: 'attach', id: enB[0].id, cols: enB[0].cols, rows: enB[0].rows, keep: true })
+  await sleep(1500)
+  espia.send({ type: 'detach' }); espia.close()
+  const pantalla = visto.filter((m) => m.type === 'replay' || m.type === 'out').map((m) => m.data).join('')
+  console.log(`    la consola de la otra máquina: ${enB[0].cols}×${enB[0].rows} · ${JSON.stringify(pantalla.slice(-120))}`)
+  assert.match(pantalla, new RegExp('DIR=' + b.dir.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')), 'lo tecleado no llegó a la otra máquina')
+  assert.ok(enB[0].cols > 80, `la consola no tomó el tamaño de la ventana: ${enB[0].cols}×${enB[0].rows}`)
+  assert.equal(enB.length, 1, 'no se creó otra consola en la otra máquina')
+  assert.ok(enB[0].viewers >= 1, 'la ventana de la caja no está mirando la consola de la otra máquina: ' + JSON.stringify(enB[0].watchers))
+  // De vuelta a la de aquí, con un clic en su fila.
+  enCaja('xdotool mousemove 70 132 click 1')
+  await sleep(5000)
+  console.log('    captura: ' + captura('5-de-vuelta-en-la-local'))
+  assert.equal(ventanas(), antes, 'se abrió otra ventana al volver')
+  const despues = await esperar(async () => { const l = await lista(); return l[0].viewers === 0 ? l : null }, { que: 'que la consola de la otra máquina quede suelta' })
+  assert.equal(despues.length, 1, 'la consola de la otra máquina sigue viva')
 })
 
 console.log('\nSMOKE · el .rpm publicado, en Fedora, ve las consolas de otra máquina\n')

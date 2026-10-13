@@ -364,7 +364,7 @@ escenario('CN: un servicio solo ve SU cajón de secretos, nada más', async () =
   const svc = acta.members.find((m) => m.cn === 'proxy')
   assert.ok(svc, 'el servicio queda en el acta con su nombre')
   assert.equal(svc.isService, true)
-  assert.deepEqual(svc.caps, ['secrets'], 'y solo con permiso para su cajón')
+  assert.deepEqual(svc.caps, [], 'sin ningún permiso: su cajón lo abre el nombre')
 
   // Lee lo suyo…
   const secretos = await waitForSecrets({ dir, ns: 'proxy' })

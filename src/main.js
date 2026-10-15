@@ -1,6 +1,7 @@
 import '@dotrino/topbar'   // marca + idioma + perfil (§6.1) + support (§6)
 import { Identity } from '@dotrino/identity'
 import { createVaultReputation } from '@dotrino/reputation'
+import '@dotrino/theme/theme.css'
 import './style.css'
 
 // NO es PWA a propósito: sin service worker ni botón de instalar (ver index.html

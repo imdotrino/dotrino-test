@@ -264,6 +264,14 @@ de la release y `@dotrino/terminal-agent` de npm), que es lo que tiene quien se 
   la marca de la app y contestar PowerShell desde la otra máquina, y deja una captura (`--out`).
   Se llama a `dotrino-terminal.cmd`: la política de ejecución de PowerShell bloquea el `.ps1` de npm.
 
+- **`npm run smoke:terminal-windows-sesion -- --desktop <zip>`** — lo que una sesión SSH de
+  administrador no prueba: una cuenta **sin administrador** (`dtuser`, Node en su carpeta), **un
+  reinicio de verdad** con inicio de sesión automático (el host ve la VM sin SSH: la levanta la
+  entrada de `Run`), la app abierta **como con doble clic** (el Explorador, sin elevar, sin
+  argumentos) y `desktop update` con la app abierta. Reinicia la VM dos veces y deja el inicio de
+  sesión como estaba. La VM necesita la directiva `DisablePrivacyExperience` (sin ella el primer
+  inicio de sesión de la cuenta se queda en la pantalla de privacidad y no arranca nada).
+
   ```bash
   virsh -c qemu:///system start win11     # si estaba apagada
   node smoke/terminal-windows.mjs [--version 0.47.2] [--installed] [--desktop <zip>] [--verbose]

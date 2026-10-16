@@ -36,7 +36,8 @@
     "smoke:terminal-vm": "node smoke/terminal-vm.mjs",
     "smoke:demo-terminal": "node smoke/demo-terminal.mjs",
     "smoke:demo-restaurar": "node smoke/demo-restaurar.mjs",
-    "smoke:terminal-windows": "node smoke/terminal-windows.mjs"
+    "smoke:terminal-windows": "node smoke/terminal-windows.mjs",
+    "smoke:terminal-windows-sesion": "node smoke/terminal-windows-sesion.mjs"
   },
   "devDependencies": {
     "@vitejs/plugin-basic-ssl": "2.3.0",

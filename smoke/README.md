@@ -259,11 +259,14 @@ de la release y `@dotrino/terminal-agent` de npm), que es lo que tiene quien se 
   el supervisor lo tiene que crear WMI), PowerShell abierto desde la otra máquina, la ventana de
   la VM por la tubería con nombre y la línea de `HKCU\…\Run` lanzada como al iniciar sesión.
   `--installed` prueba lo que la VM ya tenga (una rama bajada de GitHub, antes de publicarla).
+  `--desktop <zip>` añade la app de escritorio (el artefacto de `desktop-windows.yml` o la release):
+  se abre en la sesión gráfica con una tarea programada interactiva, su consola tiene que salir con
+  la marca de la app y contestar PowerShell desde la otra máquina, y deja una captura (`--out`).
   Se llama a `dotrino-terminal.cmd`: la política de ejecución de PowerShell bloquea el `.ps1` de npm.
 
   ```bash
   virsh -c qemu:///system start win11     # si estaba apagada
-  node smoke/terminal-windows.mjs [--version 0.47.1] [--installed] [--verbose]
+  node smoke/terminal-windows.mjs [--version 0.47.2] [--installed] [--desktop <zip>] [--verbose]
   ```
 
 `terminal-otras-maquinas --b-agent <carpeta>` pone en la máquina vista otra versión del agente

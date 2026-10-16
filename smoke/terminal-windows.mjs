@@ -19,6 +19,9 @@
  *
  *   node smoke/terminal-windows.mjs [--ssh dotrino-win11] [--host 192.168.122.1] [--version 0.47.0] [--verbose]
  *        [--installed]  no instala nada: prueba lo que la VM ya tenga (una rama, antes de publicarla)
+ *        [--desktop <zip>]  además, la app de escritorio de ese .zip (el artefacto de CI o la release):
+ *                       se abre en la sesión gráfica de Windows y su consola tiene que ser PowerShell
+ *        [--out <carpeta>]  dónde dejar la captura de la pantalla de la VM
  */
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -36,6 +39,8 @@ const HOST = arg('--host', '192.168.122.1')
 const VERSION = arg('--version', JSON.parse(fs.readFileSync(path.join(AGENTE, 'package.json'), 'utf8')).version)
 const PERFIL = 'winvm'
 const INSTALLED = process.argv.includes('--installed')
+const DESKTOP_ZIP = arg('--desktop') && path.resolve(arg('--desktop'))
+const OUT = path.resolve(arg('--out') || tmpDir('win-capturas'))
 
 let proxy = null
 let vault = null
@@ -152,6 +157,46 @@ escenario('el host ve la VM y abre PowerShell en ella', async () => {
   const m = await esperar(() => /desde-42-(\S+)/.exec(out()), { que: () => 'que PowerShell conteste desde la VM\n' + out() })
   console.log(`    PowerShell contestó desde ${m[1]}`)
   c.close()
+})
+
+if (DESKTOP_ZIP) escenario('la app de escritorio abre en la sesión de Windows con el perfil, y su consola es PowerShell', async () => {
+  const zip = path.basename(DESKTOP_ZIP)
+  const tmp = `${home.replace(/\\/g, '/')}/AppData/Local/Temp/${zip}`
+  const r = spawnSync('scp', ['-o', 'BatchMode=yes', DESKTOP_ZIP, `${SSH_HOST}:${tmp}`], { encoding: 'utf8' })
+  assert.equal(r.status, 0, `copiar el .zip: ${r.stderr}`)
+  // Como la instalaría alguien: el .zip desempaquetado en sus programas de usuario.
+  const exe = bien(ps(`$dst = "$env:LOCALAPPDATA\\Programs\\DotrinoTerminal"; Remove-Item -Recurse -Force $dst -ErrorAction SilentlyContinue; Expand-Archive '${tmp}' $dst -Force; (Get-ChildItem $dst -Recurse -Filter dotrino-terminal-desktop.exe).FullName`), 'desempaquetar').out.trim().split(/\r?\n/).at(-1)
+  console.log('    ' + exe)
+  // En la sesión gráfica del usuario (desde SSH no se ve nada): una tarea interactiva, ya.
+  bien(ps(`$a = New-ScheduledTaskAction -Execute '${exe}' -Argument '--name ${PERFIL}'; $p = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive; Register-ScheduledTask -TaskName DotrinoDesktopSmoke -Action $a -Principal $p -Force | Out-Null; Start-ScheduledTask -TaskName DotrinoDesktopSmoke`), 'abrir la app en la sesión')
+  // Su ventana engancha una consola del agente con la marca de la app (`desktop-<pid>-<n>`).
+  const consola = await esperar(async () => {
+    const f = (await vistasDesdeB())?.list?.find((y) => y.name === 'windows-vm')
+    return f?.consoles?.find((c) => JSON.stringify(c.watchers || []).includes('"tag":"desktop-'))
+  }, { timeoutMs: 60000, cada: 2000, que: () => 'la consola de la app\n' + ps('Get-Process dotrino-terminal-desktop -ErrorAction SilentlyContinue | Format-List Id,StartTime; Get-Content -Tail 20 "$env:USERPROFILE\\.config\\dotrino-terminal\\desktop.log" -ErrorAction SilentlyContinue').out + logVM() })
+  // Desde la otra máquina se entra en ESA consola, la de la ventana, y contesta PowerShell.
+  const { connectLocal } = await import(path.join(AGENTE, 'local.js'))
+  const c = await connectLocal(b.dir)
+  const got = []
+  c.on('message', (m) => got.push(m))
+  c.send({ type: 'via', machine: 'windows-vm' })
+  c.send({ type: 'attach', id: consola.id, cols: 100, rows: 30 })
+  await esperar(() => got.find((m) => m.type === 'attached' || m.type === 'fail'), { que: 'engancharse a la consola de la app' })
+  assert.equal(got.find((m) => m.type === 'fail'), undefined, JSON.stringify(got.find((m) => m.type === 'fail')))
+  c.send({ type: 'input', data: 'Write-Output "app-$(6*7)"\r' })
+  const out = () => got.filter((m) => m.type === 'out' || m.type === 'replay').map((m) => m.data).join('')
+  await esperar(() => /app-42/.test(out()), { que: () => 'que conteste PowerShell en la consola de la app\n' + out() })
+  c.close()
+  await sleep(1500)
+  // La pantalla de la VM, para mirarla: la app abierta con el resultado escrito.
+  fs.mkdirSync(OUT, { recursive: true })
+  const ppm = path.join(OUT, 'win-app.ppm')
+  const shot = spawnSync('virsh', ['-c', 'qemu:///system', 'screenshot', 'win11', ppm], { encoding: 'utf8' })
+  if (shot.status === 0) {
+    spawnSync('convert', [ppm, path.join(OUT, 'win-app.png')])
+    console.log('    captura: ' + path.join(OUT, 'win-app.png'))
+  }
+  ps('Stop-Process -Name dotrino-terminal-desktop -Force -ErrorAction SilentlyContinue; Unregister-ScheduledTask -TaskName DotrinoDesktopSmoke -Confirm:$false')
 })
 
 escenario('la ventana de la VM, por la tubería con nombre, ve al host', async () => {

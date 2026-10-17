@@ -1,7 +1,7 @@
 /**
  * SMOKE · la INVITACIÓN CORTA leída por la consola del navegador.
  *
- * `smoke/navegador.mjs` ya empareja un navegador con la bóveda, pero lo hace con la
+ * `smoke/browser.mjs` ya empareja un navegador con la bóveda, pero lo hace con la
  * invitación LARGA (el JSON en base64url): levanta el proxio SIN identidad de nodo, y
  * un proxio sin identidad no puede emitir citas, así que la bóveda cae sola a la forma
  * larga. Por eso el camino que de verdad se usa hoy —el QR corto con la CITA del
@@ -18,7 +18,7 @@
  * quien canjea. Se comprueban por separado a propósito: así, si falla, se ve de qué
  * lado está el problema en vez de tener un «no empareja» sin dueño.
  *
- *   node smoke/pairing-corto.mjs [--consola <ruta al dist>] [--iframe <ruta>] [--verbose]
+ *   node smoke/short-pairing.mjs [--consola <ruta al dist>] [--iframe <ruta>] [--verbose]
  *
  * `--consola` y `--iframe` sirven para correrlo contra el build de otra rama y comparar.
  *
@@ -37,7 +37,7 @@ import crypto from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import {
-  escenario, correr, startVault, teardown, servirEstatico,
+  scenario, runScenarios, startVault, teardown, serveStatic,
   freePort, waitPort, tmpDir, ROOT
 } from './lib/harness.js'
 
@@ -105,8 +105,8 @@ function textoDeInvitacion (qr, proxyUrl) {
 /** Abre la consola con la invitación en el `#fragment`, apuntando al iframe local. */
 async function abrirConsola (hash = '') {
   const page = await contexto.newPage()
-  page.on('console', (m) => log('[navegador] ' + m.text()))
-  page.on('pageerror', (e) => log('[navegador!] ' + e.message))
+  page.on('console', (m) => log('[browser] ' + m.text()))
+  page.on('pageerror', (e) => log('[browser!] ' + e.message))
   await page.goto(
     `${webConsola.url}/vault?vault=${encodeURIComponent(webIframe.url + '/?proxy=' + encodeURIComponent(proxy.url))}&proxy=${encodeURIComponent(proxy.url)}${hash}`
   )
@@ -121,19 +121,19 @@ async function abrirConsola (hash = '') {
 
 let invitacion = null
 
-escenario('la bóveda emite la invitación CORTA cuando el proxio sabe dar citas', async () => {
+scenario('la bóveda emite la invitación CORTA cuando el proxio sabe dar citas', async () => {
   const qr = await vault.pair({ label: 'navegador-corto' })
-  log('[bóveda] qr: ' + JSON.stringify(qr))
+  log('[vault] qr: ' + JSON.stringify(qr))
   assert.ok(qr.conn || (qr.iss && qr.token), 'la bóveda publicó algo emparejable')
   assert.ok(qr.sn, 'con su nonce de sesión')
   assert.ok(qr.conn, 'y es la forma CORTA (una cita del proxio), no la larga con la llave')
 
   invitacion = textoDeInvitacion(qr, proxy.url)
-  log('[bóveda] invitación: ' + invitacion)
+  log('[vault] invite: ' + invitacion)
   assert.ok(invitacion.length < 160, 'la invitación es corta de verdad: ' + invitacion.length)
 })
 
-escenario('la consola ACEPTA la invitación corta (no la descarta como inválida)', async () => {
+scenario('la consola ACEPTA la invitación corta (no la descarta como inválida)', async () => {
   const page = await abrirConsola('#v=' + encodeURIComponent(invitacion))
 
   // Lo que rompía antes: `extractPayload`/`announce` exigían `iss`+`token`, que la
@@ -161,7 +161,7 @@ escenario('la consola ACEPTA la invitación corta (no la descarta como inválida
   await page.close()
 })
 
-escenario('y la canjea contra el proxio hasta enseñar los seis dígitos', async () => {
+scenario('y la canjea contra el proxio hasta enseñar los seis dígitos', async () => {
   // Invitación NUEVA: la cita es de un solo uso y el escenario anterior gastó la suya.
   const fresca = textoDeInvitacion(await vault.pair({ label: 'navegador-corto-2' }), proxy.url)
   const page = await abrirConsola('#v=' + encodeURIComponent(fresca))
@@ -193,31 +193,31 @@ escenario('y la canjea contra el proxio hasta enseñar los seis dígitos', async
 
 // ---------- arranque ----------
 
-console.log('\nSMOKE · la invitación CORTA en la consola del navegador\n')
+console.log('\nSMOKE · the SHORT invite in the browser console\n')
 if (!fs.existsSync(path.join(CONSOLA, 'index.html'))) {
-  console.error(`Falta el build de la consola en ${CONSOLA}.\n`)
+  console.error(`Missing the console build in ${CONSOLA}.\n`)
   process.exit(2)
 }
 try {
   const { chromium } = await import('playwright')
   proxy = await startProxyConNodo()
   vault = await startVault({ proxyUrl: proxy.url, name: 'boveda', log })
-  webConsola = await servirEstatico(CONSOLA, { spa: true })
-  webIframe = await servirEstatico(IFRAME)
-  console.log(`  proxy     ${proxy.url}  (con identidad de nodo: emite citas)`)
+  webConsola = await serveStatic(CONSOLA, { spa: true })
+  webIframe = await serveStatic(IFRAME)
+  console.log(`  proxy     ${proxy.url}  (with node identity: issues appointments)`)
   console.log(`  consola   ${webConsola.url}/vault   ← ${CONSOLA}`)
-  console.log(`  identidad ${webIframe.url}  (el iframe, en otro origen)\n`)
+  console.log(`  identity ${webIframe.url}  (the iframe, on another origin)\n`)
 
   navegador = await chromium.launch({ headless: !VERBOSE })
   contexto = await navegador.newContext({ locale: 'es-ES' })
 
-  const ok = await correr()
+  const ok = await runScenarios()
   await contexto?.close(); await navegador?.close()
   try { proxy?.child?.kill('SIGKILL') } catch (_) {}
   await teardown()
   process.exit(ok ? 0 : 1)
 } catch (e) {
-  console.error('\nno se pudo montar el escenario:', e?.stack || e)
+  console.error('\ncould not set up the scenario:', e?.stack || e)
   try { await contexto?.close(); await navegador?.close() } catch (_) {}
   try { proxy?.child?.kill('SIGKILL') } catch (_) {}
   await teardown()

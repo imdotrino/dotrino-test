@@ -14,7 +14,7 @@
  *     montarlo, el material cae al hostname, que es el id del contenedor y cambia cada vez.
  *
  *   npm run smoke:demo-restaurar
- *   node smoke/demo-restaurar.mjs --verbose
+ *   node smoke/demo-restore.mjs --verbose
  *
  * Requiere Docker y el build:  cd dotrino-terminal && npm run build
  */
@@ -22,9 +22,9 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
-import { escenario, correr, startProxy, startVault, teardown, servirEstatico, tmpDir, ROOT } from './lib/harness.js'
-import { dockerDisponible } from './lib/caja.js'
-import { servirPaginaDeEntrar, entrar as entrarCon } from './lib/entrar.js'
+import { scenario, runScenarios, startProxy, startVault, teardown, serveStatic, tmpDir, ROOT } from './lib/harness.js'
+import { dockerAvailable } from './lib/box.js'
+import { serveLoginPage, signIn } from './lib/sign-in.js'
 
 const VERBOSE = process.argv.includes('--verbose')
 const LOGS = VERBOSE || process.argv.includes('--logs')
@@ -67,10 +67,10 @@ async function esperar (fn, { timeoutMs = 20000, que = 'la condición' } = {}) {
     if (v) return v
     await sleep(150)
   }
-  throw new Error('se agotó la espera de ' + que)
+  throw new Error('timed out waiting for ' + que)
 }
 
-const entrar = (contexto) => entrarCon(contexto, { paginaUrl: webEntrar.url, iframeUrl: iframeUrl(), proxyUrl: proxy.url, address: direccion, password: CLAVE })
+const entrar = (contexto) => signIn(contexto, { paginaUrl: webEntrar.url, iframeUrl: iframeUrl(), proxyUrl: proxy.url, address: direccion, password: CLAVE })
 
 /** Abre la PWA, entra en la máquina y comprueba que la shell contesta. */
 async function abrirShell (contexto, { timeoutMs = 45000 } = {}) {
@@ -89,7 +89,7 @@ async function abrirShell (contexto, { timeoutMs = 45000 } = {}) {
     await p.keyboard.type(`echo ${marca}-$((1+1))\n`)
     await esperar(async () => (await p.locator('.xterm-rows').first().innerText()).includes(`${marca}-2`), { que: 'la respuesta de la shell' })
   } catch (e) {
-    if (LOGS) console.log('[pantalla]\n' + (await p.locator('body').innerText().catch(() => '')).slice(0, 1500))
+    if (LOGS) console.log('[screen]\n' + (await p.locator('body').innerText().catch(() => '')).slice(0, 1500))
     throw e
   } finally { await p.close() }
 }
@@ -102,7 +102,7 @@ async function abrirShell (contexto, { timeoutMs = 45000 } = {}) {
 async function arrancarMaquina (dir) {
   const lineas = []
   agente = spawn(process.execPath, ['bin/cli.js', '--dir', dir, '--proxy', proxy.url, '--shell', '/bin/sh'], { cwd: AGENTE, stdio: ['ignore', 'pipe', 'pipe'] })
-  const anotar = (b) => { lineas.push(String(b)); log('[maquina] ' + String(b).trim()) }
+  const anotar = (b) => { lineas.push(String(b)); log('[machine] ' + String(b).trim()) }
   agente.stdout.on('data', anotar); agente.stderr.on('data', anotar)
   await esperar(() => lineas.join('').includes('agente activo ·'), { que: 'que la máquina arranque' })
 }
@@ -133,7 +133,7 @@ async function apagar () {
   vault = null
 }
 
-escenario('se prepara la demo una vez: bóveda en un contenedor, tester y máquina', async () => {
+scenario('se prepara la demo una vez: bóveda en un contenedor, tester y máquina', async () => {
   vault = await startVault({ proxyUrl: proxy.url, name: 'preparar', log, docker: { machineId: MACHINE_ID } })
   iss = vault.iss
   direccion = (await vault.loginsAdd(USUARIO, CLAVE, { label: 'tester' })).address
@@ -148,7 +148,7 @@ escenario('se prepara la demo una vez: bóveda en un contenedor, tester y máqui
   fs.cpSync(dirMaquina, path.join(COPIA, 'maquina'), { recursive: true })
 })
 
-escenario('la copia abre en un contenedor NUEVO, con la misma dirección, y el tester entra', async () => {
+scenario('la copia abre en un contenedor NUEVO, con la misma dirección, y el tester entra', async () => {
   await restaurar('dia-1')
   assert.equal(vault.iss, iss, 'es el mismo perfil')
   const { logins } = await vault.logins('list')
@@ -159,13 +159,13 @@ escenario('la copia abre en un contenedor NUEVO, con la misma dirección, y el t
   await abrirShell(telefono)
 })
 
-escenario('durante el día se ensucia: un login de más', async () => {
+scenario('durante el día se ensucia: un login de más', async () => {
   await vault.loginsAdd('intruso', 'otra-contrasena-larga', { label: 'intruso' })
   const { logins } = await vault.logins('list')
   assert.ok(logins.some((l) => l.user === 'intruso'), 'el login de más está')
 })
 
-escenario('el reset restaura la copia: lo añadido desaparece y la dirección es la misma', async () => {
+scenario('el reset restaura la copia: lo añadido desaparece y la dirección es la misma', async () => {
   await apagar()
   await restaurar('dia-2')
   assert.equal(vault.iss, iss, 'el mismo perfil')
@@ -175,7 +175,7 @@ escenario('el reset restaura la copia: lo añadido desaparece y la dirección es
   assert.equal(loginAddress(USUARIO, fingerprint), direccion, 'y la dirección no cambió')
 })
 
-escenario('un teléfono nuevo entra con la MISMA contraseña y abre una shell', async () => {
+scenario('un teléfono nuevo entra con la MISMA contraseña y abre una shell', async () => {
   const nuevo = await navegador.newContext({ locale: 'es-ES' })
   const r = await entrar(nuevo)
   assert.ok(r.ok, 'entra: ' + JSON.stringify(r))
@@ -183,19 +183,19 @@ escenario('un teléfono nuevo entra con la MISMA contraseña y abre una shell', 
   await nuevo.close()
 })
 
-escenario('el teléfono que entró ANTES del reset: o sigue, o vuelve a entrar con la misma contraseña', async () => {
+scenario('el teléfono que entró ANTES del reset: o sigue, o vuelve a entrar con la misma contraseña', async () => {
   // El acta restaurada es la misma que la que ya conocía, así que no hay bifurcación. Lo que
   // se perdió es su sesión en la bóveda. Se anota cuál de los dos caminos sale.
   let siguio = true
   try { await abrirShell(telefono, { timeoutMs: 20000 }) } catch (_) { siguio = false }
-  if (siguio) { console.log('      (siguió dentro sin volver a entrar)'); return }
-  console.log('      (tuvo que volver a entrar)')
+  if (siguio) { console.log('      (stayed signed in without signing in again)'); return }
+  console.log('      (had to sign in again)')
   const r = await entrar(telefono)
   assert.ok(r.ok, 'vuelve a entrar: ' + JSON.stringify(r))
   await abrirShell(telefono)
 })
 
-escenario('con la pestaña ABIERTA, la máquina se reinicia y la pestaña se recupera sola', async () => {
+scenario('con la pestaña ABIERTA, la máquina se reinicia y la pestaña se recupera sola', async () => {
   // Las sesiones viven en la memoria del agente: al reiniciarse (cada reset de la demo) deja de
   // conocerlas. La pestaña tiene que volver a saludar y seguir, no quedarse en «sesión
   // desconocida o expirada» (el fallo que se vio en la demo de Timone el 2026-10-06).
@@ -222,12 +222,12 @@ escenario('con la pestaña ABIERTA, la máquina se reinicia y la pestaña se rec
     await esperar(async () => (await pantalla()).includes('despues-4'), { que: 'la shell DESPUÉS del reinicio, en la misma pestaña' })
     assert.doesNotMatch(await p.locator('#hint').innerText(), /desconocida|unknown/i, 'sin el error de sesión desconocida')
   } catch (e) {
-    if (LOGS) console.log('[pantalla]\n' + (await p.locator('body').innerText().catch(() => '')).slice(-1500))
+    if (LOGS) console.log('[screen]\n' + (await p.locator('body').innerText().catch(() => '')).slice(-1500))
     throw e
   } finally { await p.close() }
 })
 
-escenario('con OTRO machine-id la copia no abre, y lo dice: el machine-id fijo es lo que la hace portátil', async () => {
+scenario('con OTRO machine-id la copia no abre, y lo dice: el machine-id fijo es lo que la hace portátil', async () => {
   await apagar()
   const dir = tmpDir('otra-maquina')
   fs.cpSync(path.join(COPIA, 'vault'), dir, { recursive: true })
@@ -239,23 +239,23 @@ escenario('con OTRO machine-id la copia no abre, y lo dice: el machine-id fijo e
   assert.match((error.lines || []).join(''), /kek-machine-changed|DIFFERENT machine/, 'y dice por qué')
 })
 
-console.log('\nSMOKE · la demo de Terminal se restaura de una copia (bóveda en Docker, machine-id fijo)\n')
-if (!dockerDisponible()) { console.error('Hace falta Docker: lo que se prueba es abrir la copia en un contenedor nuevo.\n'); process.exit(2) }
-if (!fs.existsSync(path.join(PWA, 'index.html'))) { console.error('Falta un build. Hazlo con:  cd dotrino-terminal && npm run build\n'); process.exit(2) }
+console.log('\nSMOKE · the Terminal demo restores from a snapshot (vault in Docker, fixed machine-id)\n')
+if (!dockerAvailable()) { console.error('Docker is required: what is tested is opening the snapshot in a new container.\n'); process.exit(2) }
+if (!fs.existsSync(path.join(PWA, 'index.html'))) { console.error('Missing a build. Build it with:  cd dotrino-terminal && npm run build\n'); process.exit(2) }
 try {
   const { chromium } = await import('playwright')
   proxy = await startProxy({ log })
-  webIframe = await servirEstatico(IFRAME)
-  webEntrar = await servirPaginaDeEntrar()
-  webPwa = await servirEstatico(PWA, { spa: true })
+  webIframe = await serveStatic(IFRAME)
+  webEntrar = await serveLoginPage()
+  webPwa = await serveStatic(PWA, { spa: true })
   navegador = await chromium.launch({ headless: !VERBOSE })
-  const ok = await correr()
+  const ok = await runScenarios()
   await apagar()
   await navegador?.close()
   await teardown()
   process.exit(ok ? 0 : 1)
 } catch (e) {
-  console.error('\nno se pudo montar el escenario:', e?.stack || e)
+  console.error('\ncould not set up the scenario:', e?.stack || e)
   try { agente?.kill('SIGKILL') } catch (_) {}
   try { await navegador?.close() } catch (_) {}
   await teardown()

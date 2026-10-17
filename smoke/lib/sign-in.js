@@ -6,10 +6,10 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { ROOT, tmpDir, servirEstatico } from './harness.js'
+import { ROOT, tmpDir, serveStatic } from './harness.js'
 
 /** Sirve la página de entrar. Devuelve `{ url }`. */
-export async function servirPaginaDeEntrar () {
+export async function serveLoginPage () {
   const identity = path.join(ROOT, 'dotrino-identity')
   const dir = tmpDir('entrar')
   // El cliente importa `../vault/…`: se sirve el paquete tal cual, con enlaces, no una copia.
@@ -19,7 +19,7 @@ export async function servirPaginaDeEntrar () {
 <script type="module">
   import { Identity } from './src/index.js'
   const q = new URLSearchParams(location.search)
-  window.entrar = async (address, password) => {
+  window.signIn = async (address, password) => {
     const id = await Identity.connect({ vaultUrl: q.get('vault'), promptUnlock: false })
     try {
       await id.loginWithPassword({ address, password, remember: true, label: 'smoke', proxyUrl: q.get('proxy') })
@@ -28,15 +28,15 @@ export async function servirPaginaDeEntrar () {
   }
   window.listo = true
 </script>`)
-  return servirEstatico(dir)
+  return serveStatic(dir)
 }
 
 /** Entra en un contexto de navegador. Devuelve `{ ok }` o `{ ok:false, code, message }`. */
-export async function entrar (contexto, { paginaUrl, iframeUrl, proxyUrl, address, password }) {
+export async function signIn (contexto, { paginaUrl, iframeUrl, proxyUrl, address, password }) {
   const p = await contexto.newPage()
   try {
     await p.goto(`${paginaUrl}/?vault=${encodeURIComponent(iframeUrl)}&proxy=${encodeURIComponent(proxyUrl)}`)
     await p.waitForFunction(() => window.listo)
-    return await p.evaluate(([a, c]) => window.entrar(a, c), [address, password])
+    return await p.evaluate(([a, c]) => window.signIn(a, c), [address, password])
   } finally { await p.close() }
 }

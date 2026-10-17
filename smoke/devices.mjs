@@ -9,18 +9,18 @@
  * `dotrino-vaultd` que se instala un usuario, y se le habla con su CLI real
  * (`--ctl pair` / `--ctl approve` / `--ctl members`). Si el binario está roto, esto se entera.
  *
- *   node smoke/dispositivos.mjs            (usa Docker si lo hay; si no, cajas locales)
- *   SMOKE_BACKEND=local node smoke/dispositivos.mjs
- *   node smoke/dispositivos.mjs --verbose
+ *   node smoke/devices.mjs            (usa Docker si lo hay; si no, cajas locales)
+ *   SMOKE_BACKEND=local node smoke/devices.mjs
+ *   node smoke/devices.mjs --verbose
  *
  * Requiere el binario compilado:  cd dotrino-vault && bash packaging/build.sh
  */
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { escenario, correr, startProxy, teardown, ROOT } from './lib/harness.js'
+import { scenario, runScenarios, startProxy, teardown, ROOT } from './lib/harness.js'
 import { pubkeyId } from '../../dotrino-identity/vault/capabilities.js'
-import { crearCaja, destruirCajas, elegirMotor, ECO } from './lib/caja.js'
+import { createBox, destroyBoxes, pickEngine, ECO } from './lib/box.js'
 import { parseInvite } from '../../dotrino-vault/lib/src/invite.js'
 
 const VERBOSE = process.argv.includes('--verbose')
@@ -41,27 +41,27 @@ async function esperar (fn, { timeoutMs = 25000, que = 'la condición' } = {}) {
     if (v) return v
     await sleep(200)
   }
-  throw new Error('se agotó la espera de ' + que)
+  throw new Error('timed out waiting for ' + que)
 }
 
 // ---------- la bóveda, corriendo como BINARIO en su propia caja ----------
 
 async function levantarBoveda () {
-  boveda = crearCaja('boveda')
+  boveda = createBox('boveda')
   // El binario trae Node dentro, pero espera `libatomic1` del sistema — lo destapó este
   // mismo test en un Debian limpio, y por eso el `.deb` la declara ahora en `Depends`.
   // En una caja mínima hay que ponerla, igual que haría el usuario con el tarball.
   if (boveda.motor === 'docker') {
     const r = boveda.exec('ldconfig -p | grep -q libatomic || (apt-get update -qq && apt-get install -y -qq libatomic1) >/dev/null 2>&1; ldconfig -p | grep -c libatomic')
-    log('[bóveda] libatomic: ' + (r.stdout || '').trim())
+    log('[vault] libatomic: ' + (r.stdout || '').trim())
   }
   const salida = []
   vaultProc = boveda.lanzar(`${BINARIO}`, {
     env: { DOTRINO_VAULT_DIR: '/data/vault', PROXY_URL: proxy.url },
-    onLinea: (l) => { salida.push(l); log('[bóveda] ' + l) }
+    onLinea: (l) => { salida.push(l); log('[vault] ' + l) }
   })
   await esperar(() => salida.some((l) => l.includes('servicio listo')), { que: 'que la bóveda arranque' })
-    .catch(() => { throw new Error('la bóveda (binario) no arrancó:\n' + salida.join('\n')) })
+    .catch(() => { throw new Error('the vault (binary) did not start:\n' + salida.join('\n')) })
   // El estado se pregunta CON EL CLI, dentro de la caja. Desde 0.89 el canal local va
   // cifrado en reposo y la clave sale de la máquina que escribió: la caja puede abrir su
   // `state.json`, el anfitrión no. Preguntarlo por el CLI es además el camino de verdad.
@@ -199,7 +199,7 @@ async function idDe (pub) {
 
 /** Corre un dispositivo en su propia caja y devuelve lo que reportó. */
 async function emparejar (d) {
-  const caja = crearCaja(d.nombre)
+  const caja = createBox(d.nombre)
   const qr = await abrirEmparejamiento(d)
 
   caja.escribir('/data/guion.mjs', d.guion)
@@ -215,10 +215,10 @@ async function emparejar (d) {
   })
 
   await esperar(() => code, { que: `el código que muestra «${d.nombre}»` })
-    .catch(() => { throw new Error(`${d.nombre} no mostró código:\n` + lineas.join('\n')) })
+    .catch(() => { throw new Error(`${d.nombre} showed no code:\n` + lineas.join('\n')) })
   aprobar(code)
   await esperar(() => ok, { que: `que «${d.nombre}» termine de emparejarse` })
-    .catch(() => { throw new Error(`${d.nombre} no completó el emparejamiento:\n` + lineas.join('\n')) })
+    .catch(() => { throw new Error(`${d.nombre} did not finish pairing:\n` + lineas.join('\n')) })
 
   return { caja, code, ...ok }
 }
@@ -227,7 +227,7 @@ async function emparejar (d) {
 
 const emparejados = []
 
-escenario('la bóveda arranca COMO BINARIO y su CLI responde', async () => {
+scenario('la bóveda arranca COMO BINARIO y su CLI responde', async () => {
   const { estado } = await levantarBoveda()
   assert.ok(estado.iss, 'publica su identidad')
   assert.ok(estado.version, 'y su versión: ' + estado.version)
@@ -236,7 +236,7 @@ escenario('la bóveda arranca COMO BINARIO y su CLI responde', async () => {
 })
 
 for (const d of DISPOSITIVOS) {
-  escenario(`empareja ${d.nombre} — ${d.que}`, async () => {
+  scenario(`empareja ${d.nombre} — ${d.que}`, async () => {
     const actaAntes = Number((/acta #(\d+)/.exec(miembros()) || [])[1])
     const r = await emparejar(d)
     assert.ok(r.pub, 'generó su propia llave, en su propia máquina')
@@ -259,7 +259,7 @@ for (const d of DISPOSITIVOS) {
   })
 }
 
-escenario('la terminal abre una shell entre dos máquinas, y al volver sigue ahí con su pantalla', async () => {
+scenario('la terminal abre una shell entre dos máquinas, y al volver sigue ahí con su pantalla', async () => {
   const agente = emparejados.find((e) => e.def.nombre === 'terminal')
   const cliente = emparejados.find((e) => e.def.nombre === 'remote-agent')
   assert.ok(agente && cliente, 'hacen falta la máquina de la terminal y otro aparato de la cuenta')
@@ -272,14 +272,14 @@ escenario('la terminal abre una shell entre dos máquinas, y al volver sigue ah�
     console.log('READY:' + a.machine)
     setInterval(() => {}, 1 << 30)
   `)
-  agente.caja.lanzar('node /data/agente.mjs', { onLinea: (l) => { salidaAgente.push(l); log('[agente] ' + l) } })
+  agente.caja.lanzar('node /data/agente.mjs', { onLinea: (l) => { salidaAgente.push(l); log('[agent] ' + l) } })
   await esperar(() => salidaAgente.some((l) => l.startsWith('READY:')), { que: 'que el agente de terminal arranque' })
-    .catch(() => { throw new Error('el agente no arrancó:\n' + salidaAgente.join('\n')) })
+    .catch(() => { throw new Error('the agent did not start:\n' + salidaAgente.join('\n')) })
 
   // El otro aparato: el MISMO cliente que usa la PWA, con la identidad de su enlace.
   const lineas = []
   let ok = false
-  cliente.caja.escribir('/data/consola.mjs', `
+  cliente.caja.escribir('/data/console.mjs', `
     import { loadLink, clientLink } from '/eco/dotrino-remote-agent/src/link.js'
     import { RemoteAgentClient } from '/eco/dotrino-remote-agent/src/client.js'
     import { probeAgents } from '/eco/dotrino-remote-agent/src/discover.js'
@@ -322,7 +322,7 @@ escenario('la terminal abre una shell entre dos máquinas, y al volver sigue ah�
     if (!pantalla.includes('dotrino-42')) { console.log('FAIL: screen not restored ' + JSON.stringify(pantalla.slice(-200))); process.exit(1) }
     console.log('OK'); process.exit(0)
   `)
-  cliente.caja.lanzar('node /data/consola.mjs', {
+  cliente.caja.lanzar('node /data/console.mjs', {
     env: { AGENT: agente.pub },
     onLinea: (l) => { lineas.push(l); log('[consola] ' + l); if (l === 'OK') ok = true }
   })
@@ -330,7 +330,7 @@ escenario('la terminal abre una shell entre dos máquinas, y al volver sigue ah�
   assert.ok(ok, 'la shell remota no devolvió la salida:\n' + lineas.join('\n') + '\n--- agente ---\n' + salidaAgente.join('\n'))
 })
 
-escenario('cada dispositivo tiene SU llave y ninguno ve el disco de otro', async () => {
+scenario('cada dispositivo tiene SU llave y ninguno ve el disco de otro', async () => {
   const pubs = emparejados.map((e) => e.pub)
   assert.equal(new Set(pubs).size, pubs.length, 'no hay dos con la misma llave')
 
@@ -345,7 +345,7 @@ escenario('cada dispositivo tiene SU llave y ninguno ve el disco de otro', async
   }
 })
 
-escenario('el acta de la bóveda tiene a todos, y el servicio entra acotado por su CN', async () => {
+scenario('el acta de la bóveda tiene a todos, y el servicio entra acotado por su CN', async () => {
   const salida = miembros()
   for (const e of emparejados) {
     const suId = await idDe(e.pub)
@@ -358,23 +358,23 @@ escenario('el acta de la bóveda tiene a todos, y el servicio entra acotado por 
 
 // ---------- arranque ----------
 
-const motor = elegirMotor()
-console.log(`\nSMOKE · emparejamiento por dispositivo, en instancias efímeras (motor: ${motor})\n`)
+const motor = pickEngine()
+console.log(`\nSMOKE · per-device pairing, in ephemeral instances (engine: ${motor})\n`)
 if (!fs.existsSync(path.join(ROOT, 'dotrino-vault/dist/dotrino-vaultd'))) {
-  console.error('Falta el binario. Compílalo con:  cd dotrino-vault && bash packaging/build.sh\n')
+  console.error('Missing the binary. Build it with:  cd dotrino-vault && bash packaging/build.sh\n')
   process.exit(2)
 }
 try {
   proxy = await startProxy({ log })
-  console.log(`  proxy local en ${proxy.url}`)
-  console.log(`  ecosistema montado de solo lectura desde ${ECO}\n`)
-  const ok = await correr()
-  destruirCajas()
+  console.log(`  local proxy at ${proxy.url}`)
+  console.log(`  ecosystem mounted read-only from ${ECO}\n`)
+  const ok = await runScenarios()
+  destroyBoxes()
   await teardown()
   process.exit(ok ? 0 : 1)
 } catch (e) {
-  console.error('\nno se pudo montar el escenario:', e?.stack || e)
-  destruirCajas()
+  console.error('\ncould not set up the scenario:', e?.stack || e)
+  destroyBoxes()
   await teardown()
   process.exit(1)
 }

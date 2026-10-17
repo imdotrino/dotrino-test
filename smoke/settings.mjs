@@ -19,9 +19,9 @@
  * el pedido** cuando un cliente pide credenciales TURN. El que conteste delata qué
  * configuración está de verdad en efecto.
  *
- *   node smoke/configuracion.mjs            (usa Docker si lo hay; si no, cajas locales)
- *   SMOKE_BACKEND=local node smoke/configuracion.mjs
- *   node smoke/configuracion.mjs --verbose
+ *   node smoke/settings.mjs            (usa Docker si lo hay; si no, cajas locales)
+ *   SMOKE_BACKEND=local node smoke/settings.mjs
+ *   node smoke/settings.mjs --verbose
  *
  * Requiere el binario de la bóveda:  cd dotrino-vault && bash packaging/build.sh
  */
@@ -29,8 +29,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
-import { escenario, correr, freePort, waitPort, teardown, ROOT } from './lib/harness.js'
-import { crearCaja, destruirCajas } from './lib/caja.js'
+import { scenario, runScenarios, freePort, waitPort, teardown, ROOT } from './lib/harness.js'
+import { createBox, destroyBoxes } from './lib/box.js'
 import { parseInvite } from '../../dotrino-vault/lib/src/invite.js'
 
 const VERBOSE = process.argv.includes('--verbose')
@@ -62,7 +62,7 @@ async function esperar (fn, { timeoutMs = 30000, que = 'la condición' } = {}) {
     if (v) return v
     await sleep(200)
   }
-  throw new Error('se agotó la espera de ' + que)
+  throw new Error('timed out waiting for ' + que)
 }
 
 // ─────────────────────────── Cloudflare falso ───────────────────────────
@@ -86,7 +86,7 @@ async function levantarCloudflareFalso (etiqueta) {
       let ttl = null
       try { ttl = JSON.parse(body || '{}').ttl } catch (_) {}
       pedidos.push({ keyId, ttl, auth: req.headers.authorization || '' })
-      log(`[cf:${etiqueta}] pedido con keyId=${keyId} ttl=${ttl}`)
+      log(`[cf:${etiqueta}] request with keyId=${keyId} ttl=${ttl}`)
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(JSON.stringify({
         iceServers: {
@@ -132,7 +132,7 @@ async function levantarProxio ({ env = {} } = {}) {
       VAULT_SERVICE_DIR: '/data/vault-service',
       ...env
     },
-    onLinea: (l) => { salidaProxio.push(l); log('[proxio] ' + l) }
+    onLinea: (l) => { salidaProxio.push(l); log('[proxy] ' + l) }
   })
   await waitPort(puertoProxy, 25000)
   return proxioProc
@@ -160,10 +160,10 @@ async function levantarBoveda () {
   const salida = []
   bovedaProc = boveda.lanzar(`echo $$ > /data/boveda.pid && exec ${BINARIO}`, {
     env: { DOTRINO_VAULT_DIR: '/data/vault', PROXY_URL: `ws://127.0.0.1:${puertoProxy}` },
-    onLinea: (l) => { salida.push(l); log('[bóveda] ' + l) }
+    onLinea: (l) => { salida.push(l); log('[vault] ' + l) }
   })
   await esperar(() => salida.some((l) => l.includes('servicio listo')), { que: 'que la bóveda arranque' })
-    .catch(() => { throw new Error('la bóveda (binario) no arrancó:\n' + salida.join('\n')) })
+    .catch(() => { throw new Error('the vault (binary) did not start:\n' + salida.join('\n')) })
   return salida
 }
 
@@ -187,7 +187,7 @@ const setSecret = (ns, k, v) => ctl(`secret set ${ns} ${k} ${v}`)
  *
  * Se parsea con `parseInvite` y NO buscando una línea JSON: el CLI dejó de
  * imprimir JSON cuando la invitación estrenó marca de formato — ahora imprime la
- * URL del QR y el código compacto. `dispositivos.mjs` todavía espera `{"v":2` y
+ * URL del QR y el código compacto. `devices.mjs` todavía espera `{"v":2` y
  * por eso se quedaba colgado.
  */
 async function abrirEmparejamiento (servicio) {
@@ -254,7 +254,7 @@ async function estadoVault () {
 
 // ─────────────────────────── escenarios ───────────────────────────
 
-escenario('sin bóveda, el proxio corre con su .env (el modo del que se autohospeda)', async () => {
+scenario('sin bóveda, el proxio corre con su .env (el modo del que se autohospeda)', async () => {
   await levantarProxio({
     env: {
       TURN_KEY_ID: ENV_KEY_ID,
@@ -273,7 +273,7 @@ escenario('sin bóveda, el proxio corre con su .env (el modo del que se autohosp
     'un proxio sin enrolar no habla de vaults')
 })
 
-escenario('el proxio se enrola y la bóveda le CEDE la configuración: pisa el .env', async () => {
+scenario('el proxio se enrola y la bóveda le CEDE la configuración: pisa el .env', async () => {
   await levantarBoveda()
 
   // El dueño carga en la bóveda lo que de verdad debe regir.
@@ -330,7 +330,7 @@ escenario('el proxio se enrola y la bóveda le CEDE la configuración: pisa el .
   assert.equal(falsoVault.ultimo().auth, 'Bearer token-del-vault', 'incluso el token es el del vault')
 })
 
-escenario('SIN CONTRASEÑA la bóveda sigue sellando: el valor no está en claro en su disco', async () => {
+scenario('SIN CONTRASEÑA la bóveda sigue sellando: el valor no está en claro en su disco', async () => {
   // La bóveda de este smoke no tiene contraseña, que es como arranca cualquiera. Eso
   // NO significa «sin cifrar»: las variables privadas siguen selladas a la llave de
   // cada aparato, y lo único que cambia es con qué se abre la copia maestra (la llave
@@ -363,7 +363,7 @@ escenario('SIN CONTRASEÑA la bóveda sigue sellando: el valor no está en claro
   assert.equal(turn.keyId, buscado, 'y es exactamente el valor sellado, abierto con la llave del aparato')
 })
 
-escenario('el proxio NO espera a la bóveda: con ella caída, el transporte sirve igual', async () => {
+scenario('el proxio NO espera a la bóveda: con ella caída, el transporte sirve igual', async () => {
   // Es LA excepción del ecosistema, y no por importancia: el vault le habla a sus
   // servicios POR el proxio, así que un proxio que lo espera espera a alguien que
   // necesita el proxio escuchando. Todos los demás agentes sí esperan.
@@ -392,7 +392,7 @@ escenario('el proxio NO espera a la bóveda: con ella caída, el transporte sirv
     { timeoutMs: 60000, que: 'que reintente en vez de rendirse' })
 })
 
-escenario('rotar en la bóveda NO llega en caliente; llega al reiniciar', async () => {
+scenario('rotar en la bóveda NO llega en caliente; llega al reiniciar', async () => {
   // El límite real de hoy, fijado como hecho comprobado y no como sorpresa: la
   // configuración se pide UNA vez por arranque. Cambiarla en la bóveda mientras el
   // agente corre no le llega — hace falta reiniciarlo.
@@ -422,7 +422,7 @@ escenario('rotar en la bóveda NO llega en caliente; llega al reiniciar', async 
   assert.equal((await pedirTurn()).keyId, VAULT_KEY_ROTADA, 'reiniciado, sí toma el valor rotado')
 })
 
-escenario('la bóveda AVISA del cambio y el proxio lo deja a la vista sin reiniciarse', async () => {
+scenario('la bóveda AVISA del cambio y el proxio lo deja a la vista sin reiniciarse', async () => {
   // El proxio es el único agente que NO se apaga al recibir el aviso: reiniciarlo
   // corta las conexiones de todo el ecosistema —incluida la de la bóveda que mandó
   // el aviso—, así que ahí un fallo no se degrada, se cae todo. Lo anota y lo
@@ -455,7 +455,7 @@ escenario('la bóveda AVISA del cambio y el proxio lo deja a la vista sin reinic
     'sigue con la configuración que tenía; el aviso no la cambia solo')
 })
 
-escenario('avisa de lo que llegó tarde y no está en efecto hasta reiniciar', async () => {
+scenario('avisa de lo que llegó tarde y no está en efecto hasta reiniciar', async () => {
   // Consecuencia honesta de no esperar: lo que sólo se lee al arrancar queda en el
   // entorno pero no cambia nada hasta el próximo reinicio. Callarlo sería la
   // diferencia entre rotar y creer que rotaste.
@@ -474,27 +474,27 @@ escenario('avisa de lo que llegó tarde y no está en efecto hasta reiniciar', a
 // ─────────────────────────── arranque ───────────────────────────
 
 if (!fs.existsSync(path.join(ROOT, 'dotrino-vault/dist/dotrino-vaultd'))) {
-  console.error('\nFalta el binario de la bóveda. Compílalo:\n  cd dotrino-vault && bash packaging/build.sh\n')
+  console.error('\nMissing the vault binary. Build it:\n  cd dotrino-vault && bash packaging/build.sh\n')
   process.exit(2)
 }
 
-console.log('\nSMOKE · configuración PROXIO ↔ BÓVEDA (cada uno en su caja)\n')
+console.log('\nSMOKE · PROXY ↔ VAULT configuration (each in its own box)\n')
 let todoBien = false
 try {
   puertoProxy = await freePort()
   falsoEnv = await levantarCloudflareFalso('env')
   falsoVault = await levantarCloudflareFalso('vault')
 
-  proxio = crearCaja('proxio')
-  boveda = crearCaja('boveda')
-  console.log(`  motor: ${proxio.motor} · proxio en ws://127.0.0.1:${puertoProxy}`)
+  proxio = createBox('proxio')
+  boveda = createBox('boveda')
+  console.log(`  engine: ${proxio.motor} · proxy at ws://127.0.0.1:${puertoProxy}`)
   // El binario trae Node dentro pero espera `libatomic1` del sistema (lo destapó
-  // `dispositivos.mjs` en un Debian limpio). En una caja mínima hay que ponerla.
+  // `devices.mjs` en un Debian limpio). En una caja mínima hay que ponerla.
   if (boveda.motor === 'docker') {
     boveda.exec('ldconfig -p | grep -q libatomic || (apt-get update -qq && apt-get install -y -qq libatomic1) >/dev/null 2>&1')
   }
 
-  todoBien = await correr()   // `correr()` devuelve un booleano, no un código de salida
+  todoBien = await runScenarios()   // `runScenarios()` devuelve un booleano, no un código de salida
 } catch (e) {
   console.error('\n✖ ' + (e?.stack || e?.message || e))
   todoBien = false
@@ -503,7 +503,7 @@ try {
   await pararBoveda().catch(() => {})
   await falsoEnv?.cerrar()
   await falsoVault?.cerrar()
-  destruirCajas()
+  destroyBoxes()
   await teardown()
 }
 process.exit(todoBien ? 0 : 1)

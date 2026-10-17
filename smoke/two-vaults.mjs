@@ -15,9 +15,9 @@
  *   · `boveda-b` — la otra bóveda. Entra con `join` y recibe `+sella`.
  *   · `aparato`  — un teléfono cualquiera, que entra por B para demostrar que B manda.
  *
- *   node smoke/dos-bovedas.mjs            (Docker si lo hay; si no, cajas locales)
- *   SMOKE_BACKEND=local node smoke/dos-bovedas.mjs
- *   node smoke/dos-bovedas.mjs --verbose
+ *   node smoke/two-vaults.mjs            (Docker si lo hay; si no, cajas locales)
+ *   SMOKE_BACKEND=local node smoke/two-vaults.mjs
+ *   node smoke/two-vaults.mjs --verbose
  *
  * Requiere el binario:  cd dotrino-vault && bash packaging/build.sh
  *
@@ -38,9 +38,9 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { escenario, correr, startProxy, teardown, ROOT } from './lib/harness.js'
+import { scenario, runScenarios, startProxy, teardown, ROOT } from './lib/harness.js'
 import { pubkeyId } from '../../dotrino-identity/vault/capabilities.js'
-import { crearCaja, destruirCajas, elegirMotor, ECO } from './lib/caja.js'
+import { createBox, destroyBoxes, pickEngine, ECO } from './lib/box.js'
 import { parseInvite } from '../../dotrino-vault/lib/src/invite.js'
 
 const VERBOSE = process.argv.includes('--verbose')
@@ -60,7 +60,7 @@ async function esperar (fn, { timeoutMs = 30000, que = 'la condición' } = {}) {
     if (v) return v
     await sleep(200)
   }
-  throw new Error('se agotó la espera de ' + que)
+  throw new Error('timed out waiting for ' + que)
 }
 
 async function idDe (pub) {
@@ -70,7 +70,7 @@ async function idDe (pub) {
 
 /** Una bóveda de verdad: el binario que se instala un usuario, en su propia caja. */
 async function levantar (nombre) {
-  const caja = crearCaja(nombre)
+  const caja = createBox(nombre)
   // El binario trae Node dentro pero espera `libatomic1` del sistema (lo destapó el smoke
   // de dispositivos en un Debian limpio; por eso el `.deb` la declara).
   if (caja.motor === 'docker') {
@@ -82,7 +82,7 @@ async function levantar (nombre) {
     onLinea: (l) => { salida.push(l); log(`[${nombre}] ` + l) }
   })
   await esperar(() => salida.some((l) => l.includes('servicio listo')), { que: `que arranque ${nombre}` })
-    .catch(() => { throw new Error(`${nombre} no arrancó:\n` + salida.join('\n')) })
+    .catch(() => { throw new Error(`${nombre} did not start:\n` + salida.join('\n')) })
   const b = {
     caja,
     salida,
@@ -132,14 +132,14 @@ const permisosDe = (id, salida = miembrosA()) => {
   return i >= 0 ? (l[i] + ' ' + (l[i + 1] || '')) : ''
 }
 
-escenario('B entra en la cuenta de A CON SU PROPIA LLAVE', async () => {
+scenario('B entra en la cuenta de A CON SU PROPIA LLAVE', async () => {
   A = await levantar('boveda-a')
   B = await levantar('boveda-b')
 
   const invitacion = await invitacionDe(A)
   const lineasJoin = B.ctlVivo(`join '${JSON.stringify(invitacion).replace(/'/g, "'\\''")}'`)
   const codigo = await codigoEn(lineasJoin)
-  log('[test] código que muestra B: ' + codigo)
+  log('[test] code shown by B: ' + codigo)
 
   A.ctl(`approve ${codigo}`)
   await esperar(() => lineasJoin.some((l) => /ya es miembro|acta #/.test(l)), { que: 'que B confirme que entró' })
@@ -148,19 +148,19 @@ escenario('B entra en la cuenta de A CON SU PROPIA LLAVE', async () => {
     const a = miembrosA()
     return [...a.matchAll(/\b([0-9A-F]{4}-[0-9A-F]{4})\b/g)].length >= 2 ? a : null
   }, { que: 'que el acta de A liste a B' })
-  log('[test] acta de A tras el join:\n' + acta)
+  log('[test] A\'s record after the join:\n' + acta)
 
   const ids = [...acta.matchAll(/\b([0-9A-F]{4}-[0-9A-F]{4})\b/g)].map((m) => m[1])
   idB = ids[ids.length - 1]
   assert.ok(idB, 'el acta de A tiene que listar a B')
 })
 
-escenario('B NO nace pudiendo sellar: es un permiso y se concede a mano', async () => {
+scenario('B NO nace pudiendo sellar: es un permiso y se concede a mano', async () => {
   assert.ok(!/sella|sealer/i.test(permisosDe(idB)),
     'como «administra», sellar no se empareja — se concede desde el PC')
 })
 
-escenario('el dueño le DA el permiso de sellar, y se lo puede QUITAR', async () => {
+scenario('el dueño le DA el permiso de sellar, y se lo puede QUITAR', async () => {
   A.ctl(`caps ${idB} +sella`)
   await esperar(() => /sella|sealer/i.test(permisosDe(idB)), { que: 'que el acta le reconozca sellar' })
 
@@ -174,8 +174,8 @@ escenario('el dueño le DA el permiso de sellar, y se lo puede QUITAR', async ()
 /**
  * EL PASO CLAVE, y el desastre que esto viene a cubrir: A no interviene en ningún momento.
  */
-escenario('con el permiso, B admite un aparato ELLA SOLA y A adopta ese acta', async () => {
-  const telefono = crearCaja('aparato')
+scenario('con el permiso, B admite un aparato ELLA SOLA y A adopta ese acta', async () => {
+  const telefono = createBox('aparato')
   const invitacionB = await invitacionDe(B)
   const lineas = []
   telefono.escribir('/data/enrolar.mjs', `
@@ -186,7 +186,7 @@ escenario('con el permiso, B admite un aparato ELLA SOLA y A adopta ese acta', a
   `)
   telefono.lanzar('node /data/enrolar.mjs', {
     env: { QR: JSON.stringify(invitacionB) },
-    onLinea: (l) => { lineas.push(l.trim()); log('[aparato] ' + l) }
+    onLinea: (l) => { lineas.push(l.trim()); log('[device] ' + l) }
   })
   const codigoTel = await esperar(() => {
     const l = lineas.find((x) => x.startsWith('CODE:'))
@@ -198,7 +198,7 @@ escenario('con el permiso, B admite un aparato ELLA SOLA y A adopta ese acta', a
     que: 'que el teléfono acabe de enrolarse por B (sin que A intervenga)'
   })
   const idTel = await idDe(JSON.parse(ok.slice(3)).pub)
-  log('[test] el teléfono entró por B: ' + idTel)
+  log('[test] the phone joined through B: ' + idTel)
 
   // Lo que cierra el círculo: no son dos cuentas paralelas, es UNA. Lo que sella B lo
   // adopta A por las reglas de siempre (§2.4.1), sin que nadie toque el PC de A.
@@ -210,23 +210,23 @@ escenario('con el permiso, B admite un aparato ELLA SOLA y A adopta ese acta', a
 
 // ---------- arranque ----------
 
-const motor = elegirMotor()
-console.log(`\nSMOKE · dos bóvedas en la misma cuenta (motor: ${motor})\n`)
+const motor = pickEngine()
+console.log(`\nSMOKE · two vaults on the same account (engine: ${motor})\n`)
 if (!fs.existsSync(path.join(ROOT, 'dotrino-vault/dist/dotrino-vaultd'))) {
-  console.error('Falta el binario. Compílalo con:  cd dotrino-vault && bash packaging/build.sh\n')
+  console.error('Missing the binary. Build it with:  cd dotrino-vault && bash packaging/build.sh\n')
   process.exit(2)
 }
 try {
   proxy = await startProxy({ log })
-  console.log(`  proxy local en ${proxy.url}`)
-  console.log(`  ecosistema montado de solo lectura desde ${ECO}\n`)
-  const ok = await correr()
-  destruirCajas()
+  console.log(`  local proxy at ${proxy.url}`)
+  console.log(`  ecosystem mounted read-only from ${ECO}\n`)
+  const ok = await runScenarios()
+  destroyBoxes()
   await teardown()
   process.exit(ok ? 0 : 1)
 } catch (e) {
-  console.error('\nno se pudo montar el escenario:', e?.stack || e)
-  destruirCajas()
+  console.error('\ncould not set up the scenario:', e?.stack || e)
+  destroyBoxes()
   await teardown()
   process.exit(1)
 }

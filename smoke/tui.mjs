@@ -22,7 +22,7 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import fs from 'node:fs'
 import { spawn, spawnSync } from 'node:child_process'
-import { escenario, correr, startProxy, startVault, teardown, tmpDir, ROOT, VAULT_DIR } from './lib/harness.js'
+import { scenario, runScenarios, startProxy, startVault, teardown, tmpDir, ROOT, VAULT_DIR } from './lib/harness.js'
 
 const VERBOSE = process.argv.includes('--verbose')
 const log = (m) => { if (VERBOSE) console.log(m) }
@@ -84,7 +84,7 @@ function abrirTui ({ dir, lang = 'es', cols = 120, rows = 60 } = {}) {
         await sleep(120)
       }
       const visto = api.pantalla().split('\n').filter((l) => l.trim()).slice(-12).join('\n')
-      throw new Error(`la TUI nunca dijo ${re}\n--- lo último que dibujó ---\n${visto}\n---`)
+      throw new Error(`the TUI never said ${re}\n--- the last thing it drew ---\n${visto}\n---`)
     },
     /** ¿Llegó a decir esto? (sin fallar si no) */
     async dijo (re, ms = 4000) { try { await api.esperar(re, ms); return true } catch { return false } },
@@ -112,7 +112,7 @@ async function invitacionEnPantalla (dir, desdeMs) {
     if (d?.qr && (d.at || 0) >= desdeMs) return d.qr
     await sleep(150)
   }
-  throw new Error('la TUI no llegó a abrir un emparejamiento')
+  throw new Error('the TUI never opened a pairing')
 }
 
 /**
@@ -128,7 +128,7 @@ async function aDispositivos () {
     if (/▐ Dispositivos/.test(p)) return
     if (/» Bóvedas/.test(p)) { tui.teclas('\r'); await tui.esperar(/▐ Dispositivos/); return }
   }
-  throw new Error('no se pudo volver a Dispositivos')
+  throw new Error('could not go back to Devices')
 }
 
 /** Abre un emparejamiento desde Dispositivos y devuelve la invitación. */
@@ -210,7 +210,7 @@ const miembroDe = (pub) => miembros().find((m) => m.pub === pub)
 let primero = null // el aparato del escenario 2, que administran los de más abajo
 let quitado = null // el que se expulsa al final, para comprobar que se le avisa
 
-escenario('la TUI abre, entra en la bóveda y la lista sale ENTERA (con la propia bóveda)', async () => {
+scenario('la TUI abre, entra en la bóveda y la lista sale ENTERA (con la propia bóveda)', async () => {
   await tui.esperar(/Bóveda activa/)
   const t0 = Date.now()
   tui.teclas('\r') // Enter: entrar en la bóveda seleccionada
@@ -226,7 +226,7 @@ escenario('la TUI abre, entra en la bóveda y la lista sale ENTERA (con la propi
   assert.ok(Date.now() - t0 < 6000, `la lista tarda lo que tarda el daemon (${Date.now() - t0} ms)`)
 })
 
-escenario('entrar en la bóveda trae TAMBIÉN las variables (Scopes no sale en blanco)', async () => {
+scenario('entrar en la bóveda trae TAMBIÉN las variables (Scopes no sale en blanco)', async () => {
   // La variable se guarda con la TUI ya abierta: lo que ella tiene en memoria es de antes.
   await vault.setSecret('proxy', 'TURN_KEY_ID', 'k-123', true)
 
@@ -265,7 +265,7 @@ escenario('entrar en la bóveda trae TAMBIÉN las variables (Scopes no sale en b
   assert.match(revelado, /k-123/, 'una pública se revela sin contraseña')
 })
 
-escenario('emparejar con P: sale el QR, el aparato se conecta y con el código entra al acta', async () => {
+scenario('emparejar con P: sale el QR, el aparato se conecta y con el código entra al acta', async () => {
   const qr = await abrirEmparejamiento()
   assert.match(tui.todo(), /vault\.dotrino\.com|http/, 'enseña el enlace para pegar')
   primero = await aparato(qr, 'celular')
@@ -290,7 +290,7 @@ escenario('emparejar con P: sale el QR, el aparato se conecta y con el código e
   await tui.esperar(new RegExp(idLegible), 8000)
 })
 
-escenario('un SERVICIO se empareja desde la TUI, y entra al acta con su cn', async () => {
+scenario('un SERVICIO se empareja desde la TUI, y entra al acta con su cn', async () => {
   // Esto solo existía en la línea de comandos (`pair --service <ns>`): la TUI llevaba al
   // dueño hasta el QR y ahí lo dejaba, teniendo que salirse a la terminal para la única
   // clase de aparato que luego lee variables. Ahora es la tercera opción de la pregunta.
@@ -327,7 +327,7 @@ escenario('un SERVICIO se empareja desde la TUI, y entra al acta con su cn', asy
   assert.equal(m.cn, 'proxy', 'el acta lo reconoce como el servicio «proxy»')
 })
 
-escenario('CÓDIGO EQUIVOCADO: la TUI lo dice y NO da por aprobado a nadie', async () => {
+scenario('CÓDIGO EQUIVOCADO: la TUI lo dice y NO da por aprobado a nadie', async () => {
   const antes = miembros().length
   const qr = await abrirEmparejamiento()
   const intruso = await aparato(qr, 'intruso')
@@ -354,7 +354,7 @@ escenario('CÓDIGO EQUIVOCADO: la TUI lo dice y NO da por aprobado a nadie', asy
   assert.equal(miembros().length, antes + 1)
 })
 
-escenario('permisos con C: administrar se PREGUNTA antes, y queda en el acta', async () => {
+scenario('permisos con C: administrar se PREGUNTA antes, y queda en el acta', async () => {
   assert.ok(primero?.pub, 'hace falta el aparato del escenario de emparejar')
   assert.ok(!(miembroDe(primero.pub).caps || []).includes('admin'), 'nace sin administrar')
 
@@ -401,7 +401,7 @@ escenario('permisos con C: administrar se PREGUNTA antes, y queda en el acta', a
   assert.ok(!(miembroDe(primero.pub).caps || []).includes('admin'), 'y también lo recoge al quitarlo')
 })
 
-escenario('la bóveda no se echa a sí misma (V sobre el master)', async () => {
+scenario('la bóveda no se echa a sí misma (V sobre el master)', async () => {
   await aDispositivos()
   const antes = miembros().length
   tui.teclas('\x1b[H') // Home: la primera fila es el master
@@ -411,7 +411,7 @@ escenario('la bóveda no se echa a sí misma (V sobre el master)', async () => {
   assert.equal(miembros().length, antes, 'y no manda la orden: el acta no cambia')
 })
 
-escenario('quitar un aparato con V: sale del acta y la bóveda deja de firmarle', async () => {
+scenario('quitar un aparato con V: sale del acta y la bóveda deja de firmarle', async () => {
   const qr = await abrirEmparejamiento()
   const perdido = await aparato(qr, 'perdido')
   await tui.esperar(/Se conectó|PENDIENTE/)
@@ -452,7 +452,7 @@ escenario('quitar un aparato con V: sale del acta y la bóveda deja de firmarle'
   quitado = res
 })
 
-escenario('al expulsado que vuelve a llamar se le ATIENDE, para poder darle el aviso firmado', async () => {
+scenario('al expulsado que vuelve a llamar se le ATIENDE, para poder darle el aviso firmado', async () => {
   assert.ok(quitado, 'hace falta el aparato que se quitó en el escenario anterior')
   // Que la bóveda NO firme ya está probado arriba. Lo que se prueba aquí es lo contrario y
   // es igual de importante: que no le cuelgue. Un aparato que fue tuyo tiene que poder
@@ -481,7 +481,7 @@ escenario('al expulsado que vuelve a llamar se le ATIENDE, para poder darle el a
  * contestando. Antes el `join` se esperaba dentro del bucle que atiende las peticiones, así
  * que durante esos minutos la TUI de B recibía «el daemon no respondió» a todo.
  */
-escenario('j: otra bóveda pega la invitación en SU TUI y entra en la cuenta', async () => {
+scenario('j: otra bóveda pega la invitación en SU TUI y entra en la cuenta', async () => {
   const { encodeInvite } = await import(path.join(ROOT, 'dotrino-vault/lib/src/invite.js'))
   const b = await startVault({ proxyUrl: proxy.url, name: 'boveda-b', log })
   const tuiB = abrirTui({ dir: b.dir })
@@ -497,7 +497,7 @@ escenario('j: otra bóveda pega la invitación en SU TUI y entra en la cuenta', 
     tuiB.teclas('Cuenta A\r')
     const conCodigo = await tuiB.esperar(/approve \d{6}/)
     const code = conCodigo.match(/approve (\d{6})/)[1]
-    log('[test] B enseña el código ' + code)
+    log('[test] B shows the code ' + code)
 
     // B está esperando a una persona: su daemon tiene que seguir atendiendo igual.
     const t0 = Date.now()
@@ -525,26 +525,26 @@ escenario('j: otra bóveda pega la invitación en SU TUI y entra en la cuenta', 
 // Arranque
 // ---------------------------------------------------------------------------
 
-console.log('\nSMOKE · emparejar y administrar DESDE LA TUI de la bóveda\n')
+console.log('\nSMOKE · pair and manage FROM THE vault TUI\n')
 if (spawnSync('script', ['--version'], { stdio: 'ignore' }).status !== 0) {
-  console.error('Falta `script` (util-linux): sin pty no se puede pilotar una TUI. Instálalo con: sudo apt install bsdutils\n')
+  console.error('Missing `script` (util-linux): without a pty a TUI cannot be driven. Install it with: sudo apt install bsdutils\n')
   process.exit(2)
 }
 try {
   proxy = await startProxy({ log })
   vault = await startVault({ proxyUrl: proxy.url, name: 'boveda', log })
   console.log(`  proxy   ${proxy.url}`)
-  console.log(`  bóveda  ${vault.state.fingerprint}  (datos en ${vault.dir})`)
-  console.log('  TUI     node bin/dotrino-vault-tui.js, en un pty de 120×60\n')
+  console.log(`  vault   ${vault.state.fingerprint}  (data in ${vault.dir})`)
+  console.log('  TUI     node bin/dotrino-vault-tui.js, in a 120×60 pty\n')
   tui = abrirTui({ dir: vault.dir })
 
-  const ok = await correr()
+  const ok = await runScenarios()
   tui.cerrar()
   await sleep(600)
   await teardown()
   process.exit(ok ? 0 : 1)
 } catch (e) {
-  console.error('\nno se pudo montar el escenario:', e?.stack || e)
+  console.error('\ncould not set up the scenario:', e?.stack || e)
   try { tui?.cerrar() } catch (_) {}
   await teardown()
   process.exit(1)

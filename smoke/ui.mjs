@@ -15,7 +15,7 @@ import assert from 'node:assert/strict'
 import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
-import { escenario, correr, freePort, ROOT } from './lib/harness.js'
+import { scenario, runScenarios, freePort, ROOT } from './lib/harness.js'
 
 const VERBOSE = process.argv.includes('--verbose')
 const log = (m) => { if (VERBOSE) console.log(m) }
@@ -111,7 +111,7 @@ const textoDe = (page, sel) => page.evaluate((s) => {
     .map((n) => n.innerText || n.textContent || '').join('\n').replace(/\s+/g, ' ').trim()
 }, sel)
 
-escenario('el modal de perfil NUNCA enseña la pubkey en crudo', async () => {
+scenario('el modal de perfil NUNCA enseña la pubkey en crudo', async () => {
   const page = await abrir('<div id="host"></div>', `
     import '/prof/src/index.js'
     const PUB = ${JSON.stringify(PUB)}
@@ -134,7 +134,7 @@ escenario('el modal de perfil NUNCA enseña la pubkey en crudo', async () => {
   await page.close()
 })
 
-escenario('el conmutador de perfiles muestra TU foto, no el identicon, cuando la hay', async () => {
+scenario('el conmutador de perfiles muestra TU foto, no el identicon, cuando la hay', async () => {
   const page = await abrir('<div id="host"></div>', `
     import '/prof/src/index.js'
     const PUB = ${JSON.stringify(PUB)}, PUB2 = ${JSON.stringify(PUB2)}
@@ -160,7 +160,7 @@ escenario('el conmutador de perfiles muestra TU foto, no el identicon, cuando la
   await page.close()
 })
 
-escenario('crear un perfil lleva a su página y no lo crea de golpe', async () => {
+scenario('crear un perfil lleva a su página y no lo crea de golpe', async () => {
   let creado = false
   const page = await abrir('<div id="host"></div>', `
     import '/prof/src/index.js'
@@ -189,7 +189,7 @@ escenario('crear un perfil lleva a su página y no lo crea de golpe', async () =
   await page.close()
 })
 
-escenario('el topbar abre el menú de perfiles al PULSAR el avatar', async () => {
+scenario('el topbar abre el menú de perfiles al PULSAR el avatar', async () => {
   const page = await abrir('', `
     import '/tb/src/index.js'
     const PUB = ${JSON.stringify(PUB)}, PUB2 = ${JSON.stringify(PUB2)}
@@ -266,7 +266,7 @@ escenario('el topbar abre el menú de perfiles al PULSAR el avatar', async () =>
   await page.close()
 })
 
-escenario('pulsar el avatar NO abre ningún modal ni navega: abre el menú', async () => {
+scenario('pulsar el avatar NO abre ningún modal ni navega: abre el menú', async () => {
   const page = await abrir('', `
     import '/tb/src/index.js'
     const PUB = ${JSON.stringify(PUB)}
@@ -301,7 +301,7 @@ escenario('pulsar el avatar NO abre ningún modal ni navega: abre el menú', asy
   await page.close()
 })
 
-escenario('el MODAL de otra persona no se desborda en una pantalla estrecha', async () => {
+scenario('el MODAL de otra persona no se desborda en una pantalla estrecha', async () => {
   const page = await abrir('<div id="host"></div>', `
     import '/prof/src/index.js'
     const PUB = ${JSON.stringify(PUB)}, PUB2 = ${JSON.stringify(PUB2)}
@@ -340,7 +340,7 @@ escenario('el MODAL de otra persona no se desborda en una pantalla estrecha', as
   await page.close()
 })
 
-escenario('tu propio perfil, con el editor y varios perfiles, tampoco se desborda', async () => {
+scenario('tu propio perfil, con el editor y varios perfiles, tampoco se desborda', async () => {
   const page = await abrir('<div id="host" style="width:360px"></div>', `
     import '/prof/src/index.js'
     const PUB = ${JSON.stringify(PUB)}, PUB2 = ${JSON.stringify(PUB2)}
@@ -374,7 +374,7 @@ escenario('tu propio perfil, con el editor y varios perfiles, tampoco se desbord
       .filter((x) => x.w > host.getBoundingClientRect().width + 2).slice(0, 6)
     return { hueco: Math.round(host.getBoundingClientRect().width), tarjeta: Math.round(el.getBoundingClientRect().width), gordos }
   })
-  log('anchos: ' + JSON.stringify(anchos))
+  log('widths: ' + JSON.stringify(anchos))
   assert.ok(anchos.tarjeta <= anchos.hueco + 2,
     `la tarjeta (${anchos.tarjeta}px) no cabe en su hueco (${anchos.hueco}px): ` + JSON.stringify(anchos.gordos))
   assert.deepEqual(desbordes, [], 'nada debe salirse de su caja: ' + JSON.stringify(desbordes))
@@ -383,18 +383,18 @@ escenario('tu propio perfil, con el editor y varios perfiles, tampoco se desbord
 
 // ---------- arranque ----------
 
-console.log('\nSMOKE · la interfaz compartida (perfil y topbar) en un navegador\n')
+console.log('\nSMOKE · the shared UI (profile and topbar) in a browser\n')
 try {
   const { chromium } = await import('playwright')
   await servir()
   navegador = await chromium.launch({ headless: !VERBOSE })
   // Pantalla estrecha a propósito: los desbordes se ven en el móvil, no en el escritorio.
   contexto = await navegador.newContext({ locale: 'es-ES', viewport: { width: 380, height: 820 } })
-  const ok = await correr()
+  const ok = await runScenarios()
   await contexto?.close(); await navegador?.close(); servidor?.close()
   process.exit(ok ? 0 : 1)
 } catch (e) {
-  console.error('\nno se pudo montar el escenario:', e?.stack || e)
+  console.error('\ncould not set up the scenario:', e?.stack || e)
   try { await contexto?.close(); await navegador?.close(); servidor?.close() } catch (_) {}
   process.exit(1)
 }

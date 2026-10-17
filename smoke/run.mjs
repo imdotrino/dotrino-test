@@ -19,7 +19,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import { escenario, correr, startProxy, startVault, teardown, ROOT, tmpDir } from './lib/harness.js'
+import { scenario, runScenarios, startProxy, startVault, teardown, ROOT, tmpDir } from './lib/harness.js'
 
 const VERBOSE = process.argv.includes('--verbose')
 const log = (m) => { if (VERBOSE) console.log(m) }
@@ -61,7 +61,7 @@ async function dispositivo (vault, { label, onCode } = {}) {
  * Que la llave esté aquí es lo que permite que la bóveda siga sirviendo con el perfil
  * CERRADO; que solo tenga `sign` es lo que impide que eso sirva para leer nada.
  */
-escenario('la bóveda arranca con su acta: el dueño y su propia llave de comunicación', async () => {
+scenario('la bóveda arranca con su acta: el dueño y su propia llave de comunicación', async () => {
   assert.ok(vault.iss, 'la bóveda publica su identidad en state.json')
   const acta = vault.acta()
   assert.ok(acta, 'la bóveda nace con su acta')
@@ -78,7 +78,7 @@ escenario('la bóveda arranca con su acta: el dueño y su propia llave de comuni
   assert.deepEqual(comm.caps, ['sign'], 'la llave de comunicación habla; no lee ni guarda')
 })
 
-escenario('emparejar: con el código correcto se emite el cert y el dispositivo entra en el acta', async () => {
+scenario('emparejar: con el código correcto se emite el cert y el dispositivo entra en el acta', async () => {
   const d = await dispositivo(vault, { label: 'celular' })
   vault.approve(d.code)
   const res = await d.enrolled
@@ -95,7 +95,7 @@ escenario('emparejar: con el código correcto se emite el cert y el dispositivo 
   assert.ok(acta.members.some((m) => m.pub === res.device.publickey))
 })
 
-escenario('CÓDIGO EQUIVOCADO: no se emite ningún certificado, y luego el correcto sí funciona', async () => {
+scenario('CÓDIGO EQUIVOCADO: no se emite ningún certificado, y luego el correcto sí funciona', async () => {
   const antes = vault.acta().members.length
   const d = await dispositivo(vault, { label: 'intruso' })
 
@@ -115,7 +115,7 @@ escenario('CÓDIGO EQUIVOCADO: no se emite ningún certificado, y luego el corre
   assert.equal(vault.acta().members.length, antes + 1)
 })
 
-escenario('agentes headless (terminal, ia, bot) se enrolan con el mismo protocolo', async () => {
+scenario('agentes headless (terminal, ia, bot) se enrolan con el mismo protocolo', async () => {
   for (const nombre of ['terminal', 'ia', 'bot']) {
     const d = await dispositivo(vault, { label: nombre })
     vault.approve(d.code)
@@ -126,7 +126,7 @@ escenario('agentes headless (terminal, ia, bot) se enrolan con el mismo protocol
   }
 })
 
-escenario('revocar corta el acceso de verdad', async () => {
+scenario('revocar corta el acceso de verdad', async () => {
   const d = await dispositivo(vault, { label: 'perdido' })
   vault.approve(d.code)
   const res = await d.enrolled
@@ -153,7 +153,7 @@ escenario('revocar corta el acceso de verdad', async () => {
   )
 })
 
-escenario('una cuenta que ya existe NO se la lleva la bóveda: se crea una cuenta más', async () => {
+scenario('una cuenta que ya existe NO se la lleva la bóveda: se crea una cuenta más', async () => {
   // Camino B de `dotrino-vault/docs/vinculacion-de-cuentas.md`. Hasta 2026-07-27 esto
   // sobrescribía la cuenta del aparato sin preguntar —la fusión de cuentas que el modelo
   // prohíbe—; ahora la de aquí queda intacta y la de la bóveda entra como una cuenta MÁS.
@@ -198,7 +198,7 @@ escenario('una cuenta que ya existe NO se la lleva la bóveda: se crea una cuent
   dev.destroy()
 })
 
-escenario('SIN papel y apagado cuando lo echaron: pregunta al arrancar y la bóveda lo borra', async () => {
+scenario('SIN papel y apagado cuando lo echaron: pregunta al arrancar y la bóveda lo borra', async () => {
   // EL CASO QUE SE ESCAPABA. El aviso de expulsión se emite al quitar el aparato y viaja por
   // la cola del proxy, que dura 24 h: si estaba apagado, no llega nunca. Y sin certificado
   // —revocado, vencido o perdido— el aparato no puede firmar, ni leer, ni renovar, así que
@@ -247,7 +247,7 @@ escenario('SIN papel y apagado cuando lo echaron: pregunta al arrancar y la bóv
   assert.ok(fuera, 'la cuenta de la que lo echaron se fue de este aparato, sin que nadie pulsara nada')
 })
 
-escenario('el proxy verifica el acta y bindea el perfil (y rechaza una manipulada)', async () => {
+scenario('el proxy verifica el acta y bindea el perfil (y rechaza una manipulada)', async () => {
   // Un dispositivo enrolado se identifica presentando su cert y su acta.
   const d = await dispositivo(vault, { label: 'con-acta' })
   vault.approve(d.code)
@@ -277,7 +277,7 @@ escenario('el proxy verifica el acta y bindea el perfil (y rechaza una manipulad
   assert.equal(malo.publickey, res.device.publickey, 'pero el identify normal sigue funcionando')
 })
 
-escenario('el contenido viaja CIFRADO: el proxy no ve lo que guardas', async () => {
+scenario('el contenido viaja CIFRADO: el proxy no ve lo que guardas', async () => {
   const dir = tmpDir('con-contenido')
   const yo = await Identity.connect({ dir })
   const qr = await vault.pair({ label: 'con-contenido' })
@@ -319,7 +319,7 @@ escenario('el contenido viaja CIFRADO: el proxy no ve lo que guardas', async () 
   assert.ok(JSON.stringify(relectura).includes(secreto), 'cifrado sí, ilegible para su dueño no')
 })
 
-escenario('la CLI muestra el acta y cambia permisos (`members` / `caps`)', async () => {
+scenario('la CLI muestra el acta y cambia permisos (`members` / `caps`)', async () => {
   const d = await dispositivo(vault, { label: 'con-permisos' })
   vault.approve(d.code)
   const res = await d.enrolled
@@ -336,7 +336,7 @@ escenario('la CLI muestra el acta y cambia permisos (`members` / `caps`)', async
     'quitarle permisos desde la bóveda se refleja en el acta')
 })
 
-escenario('CN: un servicio solo ve SU cajón de secretos, nada más', async () => {
+scenario('CN: un servicio solo ve SU cajón de secretos, nada más', async () => {
   const { enrollService, waitForSecrets, fetchSecrets } = await import(path.join(ROOT, 'dotrino-vault/lib/src/service.js'))
 
   // La bóveda guarda un secreto para `proxy` y otro para `geo`.
@@ -375,7 +375,7 @@ escenario('CN: un servicio solo ve SU cajón de secretos, nada más', async () =
     'el cajón de otro servicio no se abre, ni con un cert válido')
 })
 
-escenario('mensajería a la PERSONA: los dos dispositivos de un contacto abren el mismo mensaje', async () => {
+scenario('mensajería a la PERSONA: los dos dispositivos de un contacto abren el mismo mensaje', async () => {
   // Bob tiene dos dispositivos en su perfil; Alice es otra persona.
   const bob = await Identity.connect({ dir: tmpDir('bob') })
   const bob2 = await Identity.connect({ dir: tmpDir('bob2') })
@@ -412,17 +412,17 @@ escenario('mensajería a la PERSONA: los dos dispositivos de un contacto abren e
 
 // ----- arranque -----
 
-console.log('\nSMOKE · ecosistema Dotrino (proxy + bóveda + dispositivos, todo local)\n')
+console.log('\nSMOKE · Dotrino ecosystem (proxy + vault + devices, all local)\n')
 try {
   proxy = await startProxy({ log })
-  console.log(`  proxy local en ${proxy.url}`)
+  console.log(`  local proxy at ${proxy.url}`)
   vault = await startVault({ proxyUrl: proxy.url, name: 'boveda', log })
-  console.log(`  bóveda con identidad ${vault.state.fingerprint}\n`)
-  const ok = await correr()
+  console.log(`  vault with identity ${vault.state.fingerprint}\n`)
+  const ok = await runScenarios()
   await teardown()
   process.exit(ok ? 0 : 1)
 } catch (e) {
-  console.error('\nno se pudo montar el escenario:', e?.stack || e)
+  console.error('\ncould not set up the scenario:', e?.stack || e)
   await teardown()
   process.exit(1)
 }

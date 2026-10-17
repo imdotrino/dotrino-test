@@ -10,11 +10,11 @@
  * dentro*. Tres piezas y ninguna sirve sola — tú pones la contraseña, el admin pide, la
  * bóveda hace el trabajo con su maestra.
  *
- *   node smoke/abrir-a-distancia.mjs [--verbose]
+ *   node smoke/remote-unlock.mjs [--verbose]
  */
 import assert from 'node:assert/strict'
 import crypto from 'node:crypto'
-import { escenario, correr, startProxy, startVault, teardown, tmpDir } from './lib/harness.js'
+import { scenario, runScenarios, startProxy, startVault, teardown, tmpDir } from './lib/harness.js'
 import { enrollDevice } from '../../dotrino-identity/vault/remote.js'
 import { requestAdmin, requestRenew } from '../../dotrino-vault/src/client.js'
 import { seal } from '../../dotrino-vault/lib/src/sealed.js'
@@ -41,7 +41,7 @@ const comoAdmin = (args) => requestAdmin({
   dir: admin.dir, ...args
 })
 
-escenario('la bóveda arranca y un aparato entra como admin', async () => {
+scenario('la bóveda arranca y un aparato entra como admin', async () => {
   proxy = await startProxy({ log })
   vault = await startVault({ proxyUrl: proxy.url, name: 'boveda', log })
 
@@ -69,7 +69,7 @@ escenario('la bóveda arranca y un aparato entra como admin', async () => {
   log('[test] admin ' + pub.slice(0, 8))
 })
 
-escenario('con la bóveda ABIERTA (sin contraseña) el admin administra como siempre', async () => {
+scenario('con la bóveda ABIERTA (sin contraseña) el admin administra como siempre', async () => {
   const r = await comoAdmin({ op: 'audit', limit: 5 })
   assert.ok(Array.isArray(r.entries), 'lee la bitácora')
 })
@@ -78,7 +78,7 @@ escenario('con la bóveda ABIERTA (sin contraseña) el admin administra como sie
  * EL CANDADO. Poner contraseña cierra el perfil, y a partir de ahí lo que reescribe el acta
  * deja de atenderse — que es exactamente el problema que esto viene a resolver.
  */
-escenario('con contraseña, la bóveda queda cerrada y `revoke` deja de atenderse', async () => {
+scenario('con contraseña, la bóveda queda cerrada y `revoke` deja de atenderse', async () => {
   await vault.profileOp('password-set', { password: PRINCIPAL })
   await vault.profileOp('lock', {})
 
@@ -86,12 +86,12 @@ escenario('con contraseña, la bóveda queda cerrada y `revoke` deja de atenders
     (e) => e.code === 'vault-locked', 'cerrada, revocar tiene que decir que está cerrada')
 })
 
-escenario('sin contraseña de admin puesta, abrir a distancia NO está disponible', async () => {
+scenario('sin contraseña de admin puesta, abrir a distancia NO está disponible', async () => {
   await assert.rejects(() => comoAdmin({ op: 'unlock.begin', nonce: 'a'.repeat(32) }),
     /has no admin password/, 'se enciende a propósito, no viene puesto')
 })
 
-escenario('se pone la contraseña del admin EN LA MÁQUINA, con el perfil abierto', async () => {
+scenario('se pone la contraseña del admin EN LA MÁQUINA, con el perfil abierto', async () => {
   await vault.profileOp('unlock', { password: PRINCIPAL })
   const r = await vault.profileOp('admin-password-set', { password: DEL_ADMIN })
   assert.match(JSON.stringify(r), /admin/, 'la bóveda confirma: ' + JSON.stringify(r.done || r))
@@ -102,7 +102,7 @@ escenario('se pone la contraseña del admin EN LA MÁQUINA, con el perfil abiert
  * EL PASO CLAVE. El aparato deriva EN SU MÁQUINA y manda el resultado dentro de un sobre
  * que solo esta bóveda puede abrir. La contraseña no viaja.
  */
-escenario('EL PASO CLAVE: el admin abre la bóveda desde otra máquina', async () => {
+scenario('EL PASO CLAVE: el admin abre la bóveda desde otra máquina', async () => {
   // DOS NONCES: el protocolo los quema al usarlos, así que repetirlo en el segundo mensaje
   // se rechaza con «nonce already used». El del segundo es el que va DENTRO del sobre.
   const params = await comoAdmin({ op: 'unlock.begin', nonce: crypto.randomBytes(16).toString('hex') })
@@ -121,7 +121,7 @@ escenario('EL PASO CLAVE: el admin abre la bóveda desde otra máquina', async (
     'con la bóveda abierta, revocar ya no dice que está cerrada: ' + (rev.message || 'ok'))
 })
 
-escenario('el mismo sobre no sirve dos veces', async () => {
+scenario('el mismo sobre no sirve dos veces', async () => {
   await vault.profileOp('lock', {})
   const params = await comoAdmin({ op: 'unlock.begin', nonce: crypto.randomBytes(16).toString('hex') })
   const nonce = crypto.randomBytes(16).toString('hex')
@@ -138,7 +138,7 @@ escenario('el mismo sobre no sirve dos veces', async () => {
     (e) => /nonce already used|ask for a key first/.test(e.message), 'un sobre es de un solo uso')
 })
 
-escenario('la contraseña EQUIVOCADA no abre, y el rechazo trae el freno', async () => {
+scenario('la contraseña EQUIVOCADA no abre, y el rechazo trae el freno', async () => {
   await vault.profileOp('lock', {})
   const params = await comoAdmin({ op: 'unlock.begin', nonce: crypto.randomBytes(16).toString('hex') })
   const nonce = crypto.randomBytes(16).toString('hex')
@@ -154,7 +154,7 @@ escenario('la contraseña EQUIVOCADA no abre, y el rechazo trae el freno', async
  * LO QUE LA HACE DOS FACTORES: tecleada en la máquina de la bóveda no abre nada. Sin esto
  * sería una segunda llave de la misma puerta.
  */
-escenario('la contraseña del admin NO vale en la máquina de la bóveda', async () => {
+scenario('la contraseña del admin NO vale en la máquina de la bóveda', async () => {
   await vault.profileOp('lock', {})
   const r = await vault.profileOp('unlock', { password: DEL_ADMIN }).catch((e) => e)
   const txt = JSON.stringify(r?.done || r?.error || r?.message || r)
@@ -165,5 +165,5 @@ escenario('la contraseña del admin NO vale en la máquina de la bóveda', async
   await vault.profileOp('unlock', { password: PRINCIPAL })
 })
 
-await correr()
+await runScenarios()
 await teardown()

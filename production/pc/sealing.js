@@ -23,7 +23,7 @@ let primitives = null
 async function crypto_ () {
   if (primitives) return primitives
   try {
-    throw new Error('sin sellado en esta prueba')
+    throw new Error('no sealing in this test')
   } catch (e) {
     throw new Error(
       'sealing requires @dotrino/identity (peer dependency) — install it, or pass ' +

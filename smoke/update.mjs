@@ -19,8 +19,8 @@
  *   npm run smoke:actualizacion [-- --verbose]
  */
 import assert from 'node:assert/strict'
-import { escenario, correr, startProxy, teardown } from './lib/harness.js'
-import { crearCaja, destruirCajas } from './lib/caja.js'
+import { scenario, runScenarios, startProxy, teardown } from './lib/harness.js'
+import { createBox, destroyBoxes } from './lib/box.js'
 import { parseInvite } from '../../dotrino-vault/lib/src/invite.js'
 import { keyLabel } from '../../dotrino-identity/vault/keyid.js'
 
@@ -37,12 +37,12 @@ let proxy = null
 async function esperar (fn, { timeoutMs = 60000, que = 'la condición' } = {}) {
   const t = Date.now() + timeoutMs
   while (Date.now() < t) { const v = await fn(); if (v) return v; await sleep(500) }
-  throw new Error('se agotó la espera de ' + que)
+  throw new Error('timed out waiting for ' + que)
 }
 
 /** Una máquina con instalación de usuario: libatomic, un `gh` de usuario comprobado y el binario. */
 function maquina (nombre, dataDir) {
-  const caja = crearCaja(nombre)
+  const caja = createBox(nombre)
   const sh = (cmd) => {
     const r = caja.exec(cmd, { env: { HOME } })
     const out = ((r.stdout || '') + (r.stderr || '')).replace(/\x1b\[[0-9;]*m/g, '')
@@ -74,15 +74,15 @@ function maquina (nombre, dataDir) {
 
 let publicada = null
 
-escenario('el release publicado se puede leer (la prueba necesita red hacia GitHub)', async () => {
+scenario('el release publicado se puede leer (la prueba necesita red hacia GitHub)', async () => {
   proxy = await startProxy()
   const r = await fetch('https://api.github.com/repos/imdotrino/dotrino-vault/releases/latest', { headers: { accept: 'application/vnd.github+json' } })
   assert.equal(r.status, 200, 'GitHub contesta')
   publicada = String((await r.json()).tag_name).replace(/^v/, '')
-  log('[release] última publicada: ' + publicada)
+  log('[release] latest published: ' + publicada)
 })
 
-escenario('POR DEFECTO: se actualiza sola y se reinicia EN EL ACTO', async () => {
+scenario('POR DEFECTO: se actualiza sola y se reinicia EN EL ACTO', async () => {
   const m = maquina('upd-sola', '/data/sola')
   m.poner('dotrino-vaultd-viejo')
   m.arrancar()
@@ -96,7 +96,7 @@ escenario('POR DEFECTO: se actualiza sola y se reinicia EN EL ACTO', async () =>
   await esperar(() => m.version() === publicada && !/corre la versi/.test(m.ctl('status')), { timeoutMs: 60000, que: `que corra la ${publicada}` })
 })
 
-escenario('CON EL AJUSTE ENCENDIDO y un aprobador que es un NAVEGADOR: pide permiso, se aprueba desde el navegador, y entonces se actualiza', async () => {
+scenario('CON EL AJUSTE ENCENDIDO y un aprobador que es un NAVEGADOR: pide permiso, se aprueba desde el navegador, y entonces se actualiza', async () => {
   const m = maquina('upd-aprobada', '/data/aprobada')
   // Primero con la versión al día, para que no se actualice antes de tener aprobador.
   m.poner('dotrino-vaultd')
@@ -107,7 +107,7 @@ escenario('CON EL AJUSTE ENCENDIDO y un aprobador que es un NAVEGADOR: pide perm
   const lineasPair = []
   m.caja.lanzar(`${BIN} --ctl pair`, { env: { HOME, DOTRINO_VAULT_DIR: '/data/aprobada' }, onLinea: (l) => lineasPair.push(l.trim()) })
   const qr = await esperar(() => { for (const l of lineasPair) { const o = l.length > 20 && parseInvite(l); if (o?.sn) return o } return null }, { que: 'la invitación' })
-  const nav = crearCaja('upd-navegador')
+  const nav = createBox('upd-navegador')
   const salidaNav = []
   let aprobo = null
   nav.lanzar(`node --input-type=module -e "$GUION"`, {
@@ -136,7 +136,7 @@ escenario('CON EL AJUSTE ENCENDIDO y un aprobador que es un NAVEGADOR: pide perm
       `
     },
     onLinea: (l) => {
-      salidaNav.push(l); log('[navegador] ' + l)
+      salidaNav.push(l); log('[browser] ' + l)
       const c = /CODE:(\d+)/.exec(l); if (c) m.ctl('approve ' + c[1])
       if (l.startsWith('PEDIDO:')) aprobo = JSON.parse(l.slice(7))
     }
@@ -147,7 +147,7 @@ escenario('CON EL AJUSTE ENCENDIDO y un aprobador que es un NAVEGADOR: pide perm
   const id = await keyLabel(pub)
   assert.match(m.ctl('members'), new RegExp(id), 'el navegador aparece entre los miembros')
   m.ctl(`caps ${id} +aprueba`)
-  log('[aprobador] ' + id + ' ' + pub.slice(0, 40))
+  log('[approver] ' + id + ' ' + pub.slice(0, 40))
   // Pedir permiso es un ajuste, apagado por defecto: sin encenderlo se actualizaría sola.
   assert.match(m.ctl('update --approval on'), /pide aprobaci[oó]n/, 'el ajuste queda encendido')
   assert.match(m.ctl('status'), /actualizar\s*:\s*pide aprobaci[oó]n/, 'y `status` lo dice')
@@ -164,7 +164,7 @@ escenario('CON EL AJUSTE ENCENDIDO y un aprobador que es un NAVEGADOR: pide perm
   await esperar(() => m.version() === publicada && !/corre la versi/.test(m.ctl('status')), { timeoutMs: 60000, que: `que corra la ${publicada}` })
 })
 
-const ok = await correr()
-destruirCajas()
+const ok = await runScenarios()
+destroyBoxes()
 await teardown()
 process.exit(ok ? 0 : 1)

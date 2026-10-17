@@ -464,7 +464,7 @@ export class WebSocketProxyClient {
    * @returns {Promise<boolean>} true si TURN quedó activo.
    */
   async enableTurn ({ publicKey, sign } = {}) {
-    if (!this._rtc) throw new Error('WebRTC está deshabilitado en este cliente')
+    if (!this._rtc) throw new Error('WebRTC is disabled in this client')
     if (this._turnTimer) {
       clearTimeout(this._turnTimer)
       this._turnTimer = null
@@ -525,17 +525,17 @@ export class WebSocketProxyClient {
    */
   async enablePush ({ publicKey, sign, vapidPublicKey, registration, swPath, swScope } = {}) {
     if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
-      throw new Error('Service Worker no soportado en este entorno')
+      throw new Error('Service Worker not supported in this environment')
     }
     if (typeof PushManager === 'undefined') {
-      throw new Error('Push API no soportada en este navegador')
+      throw new Error('Push API not supported in this browser')
     }
     if (!publicKey || typeof sign !== 'function') {
       throw new Error('enablePush requires { publicKey, sign }')
     }
     if (!vapidPublicKey) {
       const cfg = await this.getPushConfig()
-      if (!cfg.enabled || !cfg.vapidPublicKey) throw new Error('El proxy no tiene Web Push habilitado')
+      if (!cfg.enabled || !cfg.vapidPublicKey) throw new Error('The proxy does not have Web Push enabled')
       vapidPublicKey = cfg.vapidPublicKey
     }
     let reg
@@ -942,7 +942,7 @@ export class WebSocketProxyClient {
 async function normalizeSignature (sign, data) {
   const out = await sign(data)
   const sig = typeof out === 'string' ? out : (out && out.signature)
-  if (!sig) throw new Error('sign() debe devolver una firma base64 (string o {signature})')
+  if (!sig) throw new Error('sign() must return a base64 signature (string or {signature})')
   return sig
 }
 

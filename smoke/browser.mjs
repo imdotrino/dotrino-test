@@ -9,7 +9,7 @@
  * bóveda se levantan aquí. No toca producción y no necesita credenciales.
  *
  *   npm run smoke:navegador
- *   node smoke/navegador.mjs --verbose      (con los logs y sin ocultar el navegador)
+ *   node smoke/browser.mjs --verbose      (con los logs y sin ocultar el navegador)
  *
  * Requiere el build de la consola:  cd dotrino-vault/web && npm run build
  */
@@ -17,7 +17,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { escenario, correr, startProxy, startVault, teardown, servirEstatico, ROOT } from './lib/harness.js'
+import { scenario, runScenarios, startProxy, startVault, teardown, serveStatic, ROOT } from './lib/harness.js'
 
 const VERBOSE = process.argv.includes('--verbose')
 const log = (m) => { if (VERBOSE) console.log(m) }
@@ -47,8 +47,8 @@ const iframeUrl = () => `${webIframe.url}/?proxy=${encodeURIComponent(proxy.url)
 /** Abre la consola apuntando al iframe LOCAL (el `?vault=` solo lo acepta en localhost). */
 async function abrirConsola (hash = '') {
   const page = await contexto.newPage()
-  page.on('console', (m) => log('[navegador] ' + m.text()))
-  page.on('pageerror', (e) => log('[navegador!] ' + e.message))
+  page.on('console', (m) => log('[browser] ' + m.text()))
+  page.on('pageerror', (e) => log('[browser!] ' + e.message))
   await page.goto(`${webConsola.url}/vault?vault=${encodeURIComponent(iframeUrl())}&proxy=${encodeURIComponent(proxy.url)}${hash}`)
   // Entrando CON invitación la pantalla es SOLO el emparejamiento (por diseño: llegar por
   // un QR y encontrarte la consola entera es no entender ni que estás en medio de algo ni
@@ -61,7 +61,7 @@ async function abrirConsola (hash = '') {
 const b64url = (obj) => Buffer.from(JSON.stringify(obj), 'utf8')
   .toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 
-escenario('la consola abre y muestra el acta de este navegador', async () => {
+scenario('la consola abre y muestra el acta de este navegador', async () => {
   const page = await abrirConsola()
 
   const miembros = await page.locator('[data-testid="members"] .member').count()
@@ -79,7 +79,7 @@ escenario('la consola abre y muestra el acta de este navegador', async () => {
   await page.close()
 })
 
-escenario('`/d` empareja y `/vault` administra: no son la misma página', async () => {
+scenario('`/d` empareja y `/vault` administra: no son la misma página', async () => {
   // Una pantalla es informativa o administrativa (CONVENCIONES §5.1), y emparejar es un
   // proceso con su propia pantalla. `/d` es la dirección corta a la que apunta el QR:
   // llegar ahí y encontrarte la consola entera es no saber ni en qué estás ni qué botón
@@ -96,7 +96,7 @@ escenario('`/d` empareja y `/vault` administra: no son la misma página', async 
   await admin.close()
 })
 
-escenario('`/vault` decide sola: sin bóveda fuera, ESTE aparato es la bóveda y se pone a escuchar', async () => {
+scenario('`/vault` decide sola: sin bóveda fuera, ESTE aparato es la bóveda y se pone a escuchar', async () => {
   // Lo que hay que comprobar no es que exista una casilla, es que NO haga falta: un
   // navegador que no está en ninguna bóveda es su propia bóveda, y su mostrador tiene
   // que estar atendiendo sin que nadie encienda nada.
@@ -136,7 +136,7 @@ escenario('`/vault` decide sola: sin bóveda fuera, ESTE aparato es la bóveda y
   await page.close()
 })
 
-escenario('la landing explica cómo se USA, no solo cómo se descarga', async () => {
+scenario('la landing explica cómo se USA, no solo cómo se descarga', async () => {
   const page = await contexto.newPage()
   await page.goto(webConsola.url + '/')
 
@@ -155,7 +155,7 @@ escenario('la landing explica cómo se USA, no solo cómo se descarga', async ()
   await page.close()
 })
 
-escenario('la descarga ofrece las TRES formas en los TRES sistemas', async () => {
+scenario('la descarga ofrece las TRES formas en los TRES sistemas', async () => {
   const page = await contexto.newPage()
   await page.goto(webConsola.url + '/')
 
@@ -184,7 +184,7 @@ escenario('la descarga ofrece las TRES formas en los TRES sistemas', async () =>
   await page.close()
 })
 
-escenario('el navegador se empareja con la bóveda: enseña el código y entra en el acta', async () => {
+scenario('el navegador se empareja con la bóveda: enseña el código y entra en el acta', async () => {
   // La bóveda abre un emparejamiento; el QR lleva el código en el #fragment, que es como
   // llega de verdad (y que nunca viaja al servidor).
   const qr = await vault.pair({ label: 'navegador' })
@@ -198,7 +198,7 @@ escenario('el navegador se empareja con la bóveda: enseña el código y entra e
 
   // El dueño lo teclea en la bóveda.
   const deviceId = await vault.waitPending()
-  log('[bóveda] pendiente: ' + deviceId)
+  log('[vault] pending: ' + deviceId)
   vault.approve(code)
 
   // La consola pasa a estar conectada y el navegador ya es miembro del perfil de la bóveda.
@@ -270,7 +270,7 @@ escenario('el navegador se empareja con la bóveda: enseña el código y entra e
   assert.equal(perfiles.length, 2, 'quedan las dos cuentas: la de siempre y la de la bóveda')
 })
 
-escenario('con el código equivocado, la consola no da por conectado a nadie', async () => {
+scenario('con el código equivocado, la consola no da por conectado a nadie', async () => {
   const qr = await vault.pair({ label: 'navegador-2' })
   const page = await abrirConsola('#vault=' + b64url(qr))
 
@@ -290,7 +290,7 @@ escenario('con el código equivocado, la consola no da por conectado a nadie', a
   await page.close()
 })
 
-escenario('la llave del navegador NO es extraíble (solo se comprueba en un navegador)', async () => {
+scenario('la llave del navegador NO es extraíble (solo se comprueba en un navegador)', async () => {
   // Primero se usa la consola, para que el iframe genere su identidad…
   const consola = await abrirConsola()
   await consola.close()
@@ -399,7 +399,7 @@ async function abrirApp () {
   await page.goto(webApp.url + '/')
   await page.waitForFunction(() => window.__lista, null, { timeout: 30000 })
   const lista = await page.evaluate(() => window.__lista)
-  if (!lista) throw new Error('la app no pudo abrir la identidad: ' + await page.evaluate(() => window.__fallo))
+  if (!lista) throw new Error('the app could not open the identity: ' + await page.evaluate(() => window.__fallo))
 
   // PONERSE EN LA CUENTA QUE ESTÁ ENLAZADA A LA BÓVEDA. Al emparejar, este navegador acaba
   // con DOS cuentas (la suya de siempre y la de la bóveda, camino B), y la activa sigue
@@ -414,7 +414,7 @@ async function abrirApp () {
     if (!conBoveda.current) await window.__id.switchProfile(conBoveda.id)
     return { ok: true, recargar: !conBoveda.current }
   })
-  if (!cambio.ok) throw new Error('ninguna cuenta de este navegador está enlazada a la bóveda: ' + JSON.stringify(cambio.ps))
+  if (!cambio.ok) throw new Error('no account in this browser is linked to the vault: ' + JSON.stringify(cambio.ps))
   if (cambio.recargar) {
     await page.reload()
     await page.waitForFunction(() => window.__lista, null, { timeout: 30000 })
@@ -440,14 +440,14 @@ async function esperarEmpujon (page, ms = 30000) {
   let ultimo = null
   while (Date.now() < hasta) {
     ultimo = await page.evaluate(() => window.__id.profilePushState())
-    if (ultimo?.error) throw new Error('el empujón falló: ' + ultimo.error)
+    if (ultimo?.error) throw new Error('the push failed: ' + ultimo.error)
     if (ultimo?.ok === true && ultimo.at > 0) return ultimo
     await new Promise((r) => setTimeout(r, 250))
   }
-  throw new Error('el perfil no llegó a la bóveda: ' + JSON.stringify(ultimo))
+  throw new Error('the profile never reached the vault: ' + JSON.stringify(ultimo))
 }
 
-escenario('con la bóveda CERRADA, la app escribe el perfil (que era el síntoma)', async () => {
+scenario('con la bóveda CERRADA, la app escribe el perfil (que era el síntoma)', async () => {
   // La bóveda con candado y cerrada: su estado normal, y el que antes lo impedía.
   await vault.profile('password-set', { password: 'una-contraseña-de-prueba' })
   await vault.profile('lock')
@@ -469,7 +469,7 @@ escenario('con la bóveda CERRADA, la app escribe el perfil (que era el síntoma
   await page.close()
 })
 
-escenario('lo PRIVADO queda sellado: el teléfono no está en el disco de la bóveda', async () => {
+scenario('lo PRIVADO queda sellado: el teléfono no está en el disco de la bóveda', async () => {
   const store = vault.secretos()
   const bag = store?.ns?.['@me']
   assert.ok(bag?.vars, 'la bóveda tiene el cajón del perfil. Lo que hay: ' +
@@ -491,7 +491,7 @@ escenario('lo PRIVADO queda sellado: el teléfono no está en el disco de la bó
     'el teléfono no aparece en claro en ninguna parte del cajón')
 })
 
-escenario('lo PÚBLICO queda en claro, porque no hay a quién sellárselo', async () => {
+scenario('lo PÚBLICO queda en claro, porque no hay a quién sellárselo', async () => {
   const bag = vault.secretos()?.ns?.['@me']
   const nick = bag?.vars?.nickname
   assert.ok(nick, 'guardó el apodo')
@@ -501,7 +501,7 @@ escenario('lo PÚBLICO queda en claro, porque no hay a quién sellárselo', asyn
   assert.ok(!nick.ct, 'y sin sobre: sellarlo sería contradecir lo que significa público')
 })
 
-escenario('otro arranque lo reconstruye desde los sobres, sin copia local', async () => {
+scenario('otro arranque lo reconstruye desde los sobres, sin copia local', async () => {
   // SE BORRA LA COPIA LOCAL. Sin esto la app leería lo suyo y el test pasaría sin que la
   // bóveda hubiera devuelto nada — que es precisamente el fallo que no queremos que pase
   // desapercibido.
@@ -556,7 +556,7 @@ async function conAlmacen (page, fn, arg) {
   }, [webAlmacen.url + '/', fn.toString(), arg])
 }
 
-escenario('el almacén sube 1,6 MB a la bóveda en tandas, con el borrado incluido', async () => {
+scenario('el almacén sube 1,6 MB a la bóveda en tandas, con el borrado incluido', async () => {
   const page = await abrirApp()
   const r = await conAlmacen(page, async (store, hilo) => {
     const xml = 'x'.repeat(11000)   // lo que ocupa una factura de facturero
@@ -575,7 +575,7 @@ escenario('el almacén sube 1,6 MB a la bóveda en tandas, con el borrado inclui
   assert.ok(!hilos.threads[HILO].some((e) => e.id === 'f0'), 'la borrada no está')
 })
 
-escenario('un navegador sin copia local lo recupera de la bóveda, sin lo borrado', async () => {
+scenario('un navegador sin copia local lo recupera de la bóveda, sin lo borrado', async () => {
   // Desde una ruta del MISMO origen que no es la página del almacén: esa abre la base al
   // cargar, y borrarla desde ahí queda bloqueado por ella misma.
   const limpia = await contexto.newPage()
@@ -601,34 +601,34 @@ escenario('un navegador sin copia local lo recupera de la bóveda, sin lo borrad
   assert.equal(r.tieneF0, false, 'y la borrada no resucitó')
 })
 
-console.log('\nSMOKE · el navegador de verdad (Playwright), todo en local\n')
+console.log('\nSMOKE · the real browser (Playwright), all local\n')
 if (!fs.existsSync(path.join(CONSOLA, 'index.html'))) {
-  console.error('Falta el build de la consola. Hazlo con:  cd dotrino-vault/web && npm run build\n')
+  console.error('Missing the console build. Build it with:  cd dotrino-vault/web && npm run build\n')
   process.exit(2)
 }
 try {
   const { chromium } = await import('playwright')
   proxy = await startProxy({ log })
   vault = await startVault({ proxyUrl: proxy.url, name: 'boveda', log })
-  webConsola = await servirEstatico(CONSOLA, { spa: true })
-  webIframe = await servirEstatico(IFRAME)
-  webApp = await servirEstatico(prepararApp())
-  webAlmacen = await servirEstatico(path.join(ALMACEN, 'store'))
+  webConsola = await serveStatic(CONSOLA, { spa: true })
+  webIframe = await serveStatic(IFRAME)
+  webApp = await serveStatic(prepararApp())
+  webAlmacen = await serveStatic(path.join(ALMACEN, 'store'))
   console.log(`  proxy    ${proxy.url}`)
   console.log(`  consola  ${webConsola.url}/vault`)
-  console.log(`  identidad ${webIframe.url}  (el iframe, en otro origen)\n`)
+  console.log(`  identity ${webIframe.url}  (the iframe, on another origin)\n`)
 
   navegador = await chromium.launch({ headless: !VERBOSE })
   // Idioma fijo: la consola es bilingüe y elige por el del navegador. Si no se fija, las
   // comprobaciones dependerían del idioma de la máquina donde corra el test.
   contexto = await navegador.newContext({ locale: 'es-ES' })
 
-  const ok = await correr()
+  const ok = await runScenarios()
   await contexto?.close(); await navegador?.close()
   await teardown()
   process.exit(ok ? 0 : 1)
 } catch (e) {
-  console.error('\nno se pudo montar el escenario:', e?.stack || e)
+  console.error('\ncould not set up the scenario:', e?.stack || e)
   try { await contexto?.close(); await navegador?.close() } catch (_) {}
   await teardown()
   process.exit(1)

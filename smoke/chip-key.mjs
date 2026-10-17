@@ -15,8 +15,8 @@
  *   npm run smoke:llave-del-chip [-- --verbose]
  */
 import assert from 'node:assert/strict'
-import { escenario, correr, startProxy, teardown } from './lib/harness.js'
-import { crearCaja, destruirCajas } from './lib/caja.js'
+import { scenario, runScenarios, startProxy, teardown } from './lib/harness.js'
+import { createBox, destroyBoxes } from './lib/box.js'
 import { parseInvite } from '../../dotrino-vault/lib/src/invite.js'
 import { keyLabel } from '../../dotrino-identity/vault/keyid.js'
 
@@ -33,7 +33,7 @@ let boveda = null
 async function esperar (fn, { timeoutMs = 30000, que = 'la condición' } = {}) {
   const t = Date.now() + timeoutMs
   while (Date.now() < t) { const v = await fn(); if (v) return v; await sleep(250) }
-  throw new Error('se agotó la espera de ' + que)
+  throw new Error('timed out waiting for ' + que)
 }
 const ctl = (args) => {
   const r = boveda.exec(`${BINARIO} --ctl ${args}`, { env: ENV })
@@ -48,14 +48,14 @@ async function invitacion (tag) {
   return esperar(() => { for (const l of lineas) { const o = l.length > 20 && parseInvite(l); if (o?.sn) return o } return null }, { que: 'la invitación' })
 }
 
-escenario('la bóveda arranca y un aparato normal pone el perfil de la cuenta', async () => {
+scenario('la bóveda arranca y un aparato normal pone el perfil de la cuenta', async () => {
   proxy = await startProxy()
-  boveda = crearCaja('boveda-chip')
+  boveda = createBox('boveda-chip')
   if (boveda.motor === 'docker') boveda.exec('ldconfig -p | grep -q libatomic || (apt-get update -qq && apt-get install -y -qq libatomic1) >/dev/null 2>&1')
-  boveda.lanzar(BINARIO, { env: { ...ENV, PROXY_URL: proxy.url }, onLinea: (l) => log('[bóveda] ' + l) })
+  boveda.lanzar(BINARIO, { env: { ...ENV, PROXY_URL: proxy.url }, onLinea: (l) => log('[vault] ' + l) })
   await esperar(() => /corriendo/.test(ctl('status')), { que: 'que la bóveda arranque' })
   const qr = await invitacion('pair-pc')
-  const pc = crearCaja('pc-chip')
+  const pc = createBox('pc-chip')
   let empuje = null
   pc.lanzar(`node --input-type=module -e "$GUION"`, {
     env: {
@@ -81,13 +81,13 @@ escenario('la bóveda arranca y un aparato normal pone el perfil de la cuenta', 
 })
 
 const tel = {}
-escenario('el teléfono se empareja con la llave del chip: sin privadas en IndexedDB, y la app recibe la cuenta', async () => {
+scenario('el teléfono se empareja con la llave del chip: sin privadas en IndexedDB, y la app recibe la cuenta', async () => {
   const qr = await invitacion('pair-tel')
-  const caja = crearCaja('telefono-chip')
-  caja.lanzar('node /eco/dotrino-test/smoke/cajas/telefono-chip.mjs', {
+  const caja = createBox('phone-chip')
+  caja.lanzar('node /eco/dotrino-test/smoke/boxes/phone-chip.mjs', {
     env: { QR: JSON.stringify(qr) },
     onLinea: (l) => {
-      log('[teléfono] ' + l)
+      log('[phone] ' + l)
       const m = /^(\w+):(.*)$/.exec(l.trim()); if (!m) return
       let v; try { v = JSON.parse(m[2]) } catch (_) { return }
       if (m[1] === 'CODE') ctl('approve ' + v)
@@ -101,14 +101,14 @@ escenario('el teléfono se empareja con la llave del chip: sin privadas en Index
   assert.equal(tel.GUARDADA.vault, true, 'y la bóveda a la que pertenece')
 })
 
-escenario('el teléfono BAJA el perfil de la cuenta (lo que salía vacío)', async () => {
+scenario('el teléfono BAJA el perfil de la cuenta (lo que salía vacío)', async () => {
   await esperar(() => tel.ME, { timeoutMs: 30000, que: 'que el teléfono diga qué perfil tiene' })
   assert.equal(tel.ME.nickname, 'Santiago', JSON.stringify(tel.ME))
   assert.equal(tel.ME.avatar, true, 'la foto: ' + JSON.stringify(tel.ME))
   assert.equal(tel.ME.email, 'santi@example.com', 'un dato: ' + JSON.stringify(tel.ME))
 })
 
-escenario('en la bóveda es UN aparato, y con +aprueba la misma llave aprueba', async () => {
+scenario('en la bóveda es UN aparato, y con +aprueba la misma llave aprueba', async () => {
   // Unirse a la cuenta crea un perfil NUEVO en el teléfono, con su propia llave del chip.
   const id = tel.EMPAREJADO.deviceId
   assert.equal(await keyLabel(tel.EMPAREJADO.pub), id, 'el aparato de la bóveda ES la llave del chip')
@@ -119,7 +119,7 @@ escenario('en la bóveda es UN aparato, y con +aprueba la misma llave aprueba', 
   assert.ok(Number.isInteger(tel.APRUEBA.items))
 })
 
-const ok = await correr()
-destruirCajas()
+const ok = await runScenarios()
+destroyBoxes()
 await teardown()
 process.exit(ok ? 0 : 1)

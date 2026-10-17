@@ -8,7 +8,7 @@
  *
  * Existe porque el timbre es lo único de la cadena que NO se puede probar en local: hace
  * falta un servicio de push de verdad al que el navegador esté conectado. Todo lo demás
- * —que la bóveda de pestaña atienda, apruebe y avise— está en `smoke/gestor.mjs`.
+ * —que la bóveda de pestaña atienda, apruebe y avise— está en `smoke/password-manager.mjs`.
  *
  * Lo que comprueba, en orden:
  *
@@ -45,7 +45,7 @@ const srv = http.createServer((req, res) => {
 await new Promise((r) => srv.listen(0, '127.0.0.1', r))
 // `localhost` es contexto seguro; 127.0.0.1 también, y es lo que exige el service worker.
 const BASE = `http://localhost:${srv.address().port}/`
-console.log('  página  ', BASE)
+console.log('  page    ', BASE)
 
 const perfil = await mkdtemp(join(tmpdir(), 'timbre-'))
 const ctx = await chromium.launchPersistentContext(perfil, {
@@ -54,8 +54,8 @@ const ctx = await chromium.launchPersistentContext(perfil, {
   permissions: ['notifications'],
 })
 const page = await ctx.newPage()
-page.on('console', (m) => { if (!/favicon/.test(m.text())) console.log('   [pág]', m.text()) })
-page.on('pageerror', (e) => console.log('   [pág!]', e.message))
+page.on('console', (m) => { if (!/favicon/.test(m.text())) console.log('   [page]', m.text()) })
+page.on('pageerror', (e) => console.log('   [page!]', e.message))
 page.on('response', (r) => {
   // El favicon que el navegador pide solo no interesa; cualquier otro fallo sí.
   if (r.status() >= 400 && !r.url().endsWith('/favicon.ico')) console.log('   [' + r.status() + ']', r.url())
@@ -67,27 +67,27 @@ try {
   await page.waitForFunction(() => !!window.__listo, null, { timeout: 60000 })
   const quien = await page.evaluate(() => window.__listo)
   console.log('  pubkey  ', JSON.parse(quien.publickey).x.slice(0, 16) + '…')
-  console.log('  suscrito al push de producción ✓')
+  console.log('  subscribed to production push ✓')
 
   const sub = await page.evaluate(async () => {
     const reg = await navigator.serviceWorker.ready
     const s = await reg.pushManager.getSubscription()
     return s ? s.endpoint : null
   })
-  console.log('  endpoint', sub ? sub.slice(0, 58) + '…' : '(ninguno)')
-  if (!sub) throw new Error('el navegador no dio una suscripción de push')
+  console.log('  endpoint', sub ? sub.slice(0, 58) + '…' : '(none)')
+  if (!sub) throw new Error('the browser gave no push subscription')
 
   // 2. Se desconecta: para el proxio, esta pubkey pasa a estar apagada.
   await page.evaluate(() => window.__cliente.close())
   await page.waitForTimeout(6000)
-  console.log('  la bóveda de mentira se «apaga» ✓')
+  console.log('  the fake vault «goes offline» ✓')
 
   // 3. Alguien le manda algo desde fuera.
   const { WebSocketProxyClient } = await import(new URL('../../dotrino-proxy-client/src/index.js', import.meta.url).href)
   const otro = new WebSocketProxyClient({ url: 'wss://proxy.dotrino.com', enableWebRTC: false, autoReconnect: false })
   await otro.connect()
   otro.sendByPubkey([quien.publickey], { hola: 'esto debería quedar encolado' })
-  console.log('  mensaje enviado a una pubkey apagada ✓')
+  console.log('  message sent to an offline pubkey ✓')
 
   // 4. ¿Suena?
   const t0 = Date.now()
@@ -98,11 +98,11 @@ try {
     await page.waitForTimeout(1000)
   }
   if (sono) {
-    console.log(`\n  TIMBRE RECIBIDO en ${((Date.now() - t0) / 1000).toFixed(1)} s:`,
+    console.log(`\n  DOORBELL RECEIVED in ${((Date.now() - t0) / 1000).toFixed(1)} s:`,
       JSON.stringify(await page.evaluate(() => window.__timbres)))
   } else {
-    console.log('\n  NO SONÓ en 60 s.')
-    console.log('  guardado por el SW:', JSON.stringify(await page.evaluate(async () => {
+    console.log('\n  DID NOT RING within 60 s.')
+    console.log('  stored by the SW:', JSON.stringify(await page.evaluate(async () => {
       const c = await caches.open('timbre'); const r = await c.match('/ultimo')
       return r ? await r.json() : null
     })))
@@ -115,16 +115,16 @@ try {
   // Es el caso del dueño: la bóveda vive en una pestaña y la pestaña no está. Solo queda
   // el service worker, que es a quien despierta el push. Se comprueba por lo que deja
   // escrito, porque no hay nadie mirando cuando llega.
-  console.log('\n  --- y ahora con la pestaña CERRADA ---')
+  console.log('\n  --- and now with the tab CLOSED ---')
   await page.evaluate(async () => {
     const c = await caches.open('timbre'); await c.delete('/ultimo')
   })
   await page.close()
   await new Promise((r) => setTimeout(r, 1500))
-  console.log('  la pestaña se cierra; solo queda el service worker ✓')
+  console.log('  the tab closes; only the service worker remains ✓')
 
   otro.sendByPubkey([quien.publickey], { hola: 'con la pestaña cerrada' })
-  console.log('  segundo mensaje enviado ✓')
+  console.log('  second message sent ✓')
   await new Promise((r) => setTimeout(r, 8000))
 
   const page2 = await ctx.newPage()
@@ -136,8 +136,8 @@ try {
   })
   cerrada = !!guardado
   console.log(cerrada
-    ? `  TIMBRE RECIBIDO CON LA PESTAÑA CERRADA: ${JSON.stringify(guardado)}`
-    : '  no llegó nada con la pestaña cerrada')
+    ? `  DOORBELL RECEIVED WITH THE TAB CLOSED: ${JSON.stringify(guardado)}`
+    : '  nothing arrived with the tab closed')
 
   // ---- 6. ¿Y lo que quedó esperando, baja al VOLVER a abrir? -------------------
   //
@@ -146,7 +146,7 @@ try {
   // con mirar lo que anotó.
   await page2.waitForTimeout(4000)
   bajo = JSON.stringify(await page2.evaluate(() => window.__mensajes || []))
-  console.log(`  al volver a abrir, la cola baja sola: ${bajo}`)
+  console.log(`  on reopening, the queue drains by itself: ${bajo}`)
 
   }
   otro.close()

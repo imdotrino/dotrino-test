@@ -5,7 +5,7 @@
  * claves de una máquina que **no tiene la maestra** y **no puede abrir lo que entrega**,
  * mientras la bóveda está apagada. Diseño: `dotrino-vault/docs/replicas.md` §8.bis.
  *
- * No sustituye al multivault (`dos-bovedas.mjs`): aquello es una segunda bóveda que SELLA,
+ * No sustituye al multivault (`two-vaults.mjs`): aquello es una segunda bóveda que SELLA,
  * esto es un repartidor que no decide nada. Las dos piezas existen y prueban cosas
  * distintas — una cubre el desastre, la otra el día a día con la máquina del dueño apagada.
  *
@@ -23,8 +23,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { escenario, correr, startProxy, teardown } from './lib/harness.js'
-import { crearCaja, destruirCajas } from './lib/caja.js'
+import { scenario, runScenarios, startProxy, teardown } from './lib/harness.js'
+import { createBox, destroyBoxes } from './lib/box.js'
 import { WebSocketProxyClient } from '@dotrino/proxy-client'
 import { makeDeviceKey, signWithDevice } from '@dotrino/identity/capabilities'
 import { enrollService, fetchSecrets, readServiceIdentity } from '../../dotrino-vault/lib/src/service.js'
@@ -55,12 +55,12 @@ async function esperar (fn, { timeoutMs = 30000, que = 'la condición' } = {}) {
     try { const v = await fn(); if (v) return v } catch (e) { ultimo = e }
     await sleep(200)
   }
-  throw new Error('se agotó la espera de ' + que + (ultimo ? ' · último error: ' + ultimo.message : ''))
+  throw new Error('timed out waiting for ' + que + (ultimo ? ' · last error: ' + ultimo.message : ''))
 }
 
 /** Una caja con el binario dentro, lista para recibir órdenes. */
 function caja (nombre, { env = {} } = {}) {
-  const c = crearCaja(nombre)
+  const c = createBox(nombre)
   if (c.motor === 'docker') {
     c.exec('ldconfig -p | grep -q libatomic || (apt-get update -qq && apt-get install -y -qq libatomic1) >/dev/null 2>&1')
   }
@@ -80,7 +80,7 @@ function caja (nombre, { env = {} } = {}) {
 
 const tmp = (p) => fs.mkdtempSync(path.join(os.tmpdir(), p))
 
-escenario('la bóveda arranca y guarda una clave', async () => {
+scenario('la bóveda arranca y guarda una clave', async () => {
   proxy = await startProxy({ log })
   B = caja('boveda', { DOTRINO_VAULT_DIR: '/data/vault' })
   B.lanzar(BINARIO)
@@ -90,7 +90,7 @@ escenario('la bóveda arranca y guarda una clave', async () => {
   assert.equal(r.status, 0, 'guardar la clave: ' + (r.stderr || r.stdout))
 })
 
-escenario('un servicio la lee de la BÓVEDA, y con eso conoce la cuenta', async () => {
+scenario('un servicio la lee de la BÓVEDA, y con eso conoce la cuenta', async () => {
   const lineas = B.lanzar(`${BINARIO} --ctl pair --service ${NS} --quiet`)
   const inv = await esperar(() => {
     for (const l of lineas) { const o = parseInvite(l); if (o?.sn) return o }
@@ -126,7 +126,7 @@ escenario('un servicio la lee de la BÓVEDA, y con eso conoce la cuenta', async 
   assert.equal(typeof link.actaSeq, 'number', 'el servicio se quedó con el `seq` que vio')
 })
 
-escenario('el replicador entra en la cuenta, y entra SIN llave de cifrado', async () => {
+scenario('el replicador entra en la cuenta, y entra SIN llave de cifrado', async () => {
   R = caja('replicador', { DOTRINO_REPLICA_DIR: '/data/replica' })
 
   const lineas = B.lanzar(`${BINARIO} --ctl pair --scope replica --name replicador --quiet`)
@@ -134,7 +134,7 @@ escenario('el replicador entra en la cuenta, y entra SIN llave de cifrado', asyn
     for (const l of lineas) { const o = parseInvite(l); if (o?.sn) return o }
     return null
   }, { que: 'la invitación del replicador' })
-    .catch((e) => { throw new Error(e.message + '\n  lo que dijo pair:\n    ' + lineas.join('\n    ')) })
+    .catch((e) => { throw new Error(e.message + '\n  what pair said:\n    ' + lineas.join('\n    ')) })
 
   const enrolando = R.lanzar(`${BINARIO} --ctl replica enroll '${JSON.stringify(inv).replace(/'/g, "'\\''")}'`)
   const codigo = await esperar(() => {
@@ -162,14 +162,14 @@ escenario('el replicador entra en la cuenta, y entra SIN llave de cifrado', asyn
  * LA GARANTÍA, y es estructural: sin `encPub` no hay a dónde envolverle un sobre. Regla
  * del dueño — «recibirá todos los sobres que se generen, ningún sobre firmado para él».
  */
-escenario('a un replicador no se le puede envolver nada, y no puede nada más', async () => {
+scenario('a un replicador no se le puede envolver nada, y no puede nada más', async () => {
   const permisos = B.exec('members').stdout || ''
   const linea = permisos.split('\n').findIndex((l) => l.includes(idReplica))
   const suyas = permisos.split('\n').slice(linea, linea + 2).join(' ')
   assert.ok(!/sella|sealer|administra|admin/i.test(suyas), 'un replicador no sella ni administra: ' + suyas)
 })
 
-escenario('con la bóveda APAGADA, el servicio sigue recibiendo su clave', async () => {
+scenario('con la bóveda APAGADA, el servicio sigue recibiendo su clave', async () => {
   R.lanzar(`${BINARIO} --ctl replica run`)
   await esperar(() => R.salida.some((l) => /record #\d+ ·.*bundle/.test(l)), { que: 'que la bóveda le empuje los sobres' })
 
@@ -187,7 +187,7 @@ escenario('con la bóveda APAGADA, el servicio sigue recibiendo su clave', async
   await sleep(1500)
 
   const s = await esperar(() => fetchSecrets({ dir: dirServicio, ns: NS, approvalTimeoutMs: 2500 })
-    .catch((e) => { log('[test] el replicador contestó pero no valió: ' + e.message); return null }),
+    .catch((e) => { log('[test] the replicator answered but it was not valid: ' + e.message); return null }),
   { que: 'que el replicador conteste', timeoutMs: 45000 })
   assert.equal(s.API_KEY, VALOR, 'la clave llega igual, y el replicador no puede abrirla')
 })
@@ -206,7 +206,7 @@ escenario('con la bóveda APAGADA, el servicio sigue recibiendo su clave', async
  * El intruso no tiene nada: llave recién hecha, ningún papel, nunca estuvo en el acta.
  * Solo sabe a quién preguntar y por qué cajón, que es lo que se aprende mirando.
  */
-escenario('a un DESCONOCIDO el replicador no le da ni el cajón ni el acta', async () => {
+scenario('a un DESCONOCIDO el replicador no le da ni el cajón ni el acta', async () => {
   const link = readServiceIdentity(dirServicio)
   const replicaPub = (link.replicas || [])[0]
   assert.ok(replicaPub, 'el servicio tiene que conocer al replicador para que esto pruebe algo')
@@ -247,7 +247,7 @@ escenario('a un DESCONOCIDO el replicador no le da ni el cajón ni el acta', asy
  * a quien YA conoce la cuenta. A un aparato nuevo no hay con qué compararle un acta
  * atrasada, así que no se le cree y tiene que preguntarle a la bóveda.
  */
-escenario('a un aparato que nunca vio la cuenta, el replicador NO le vale', async () => {
+scenario('a un aparato que nunca vio la cuenta, el replicador NO le vale', async () => {
   dirNuevo = tmp('smoke-nuevo-')
   // Se copia el enlace del servicio que sí funciona y se le BORRA el pin: es exactamente
   // un aparato que tiene su papel pero nunca ha hablado con la bóveda.
@@ -262,6 +262,6 @@ escenario('a un aparato que nunca vio la cuenta, el replicador NO le vale', asyn
     'sin pin no se le cree a un replicador: que conteste la bóveda')
 })
 
-await correr()
-destruirCajas()
+await runScenarios()
+destroyBoxes()
 await teardown()

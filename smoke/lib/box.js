@@ -26,15 +26,15 @@ const IMAGEN = process.env.SMOKE_IMAGE || 'node:22-bookworm-slim'
 const cajas = []
 
 /** ¿Hay Docker usable? (existe y su daemon responde) */
-export function dockerDisponible () {
+export function dockerAvailable () {
   const r = spawnSync('docker', ['info'], { stdio: 'ignore' })
   return r.status === 0
 }
 
-export function elegirMotor () {
+export function pickEngine () {
   const forzado = process.env.SMOKE_BACKEND
   if (forzado) return forzado
-  return dockerDisponible() ? 'docker' : 'local'
+  return dockerAvailable() ? 'docker' : 'local'
 }
 
 const sh = (cmd, args, opts = {}) => spawnSync(cmd, args, { encoding: 'utf8', ...opts })
@@ -43,7 +43,7 @@ const sh = (cmd, args, opts = {}) => spawnSync(cmd, args, { encoding: 'utf8', ..
  * Crea una instancia efímera.
  * @returns {{nombre, motor, exec, lanzar, escribir, leer, destruir}}
  */
-export function crearCaja (nombre, { motor = elegirMotor() } = {}) {
+export function createBox (nombre, { motor = pickEngine() } = {}) {
   const caja = motor === 'docker' ? cajaDocker(nombre) : cajaLocal(nombre)
   cajas.push(caja)
   return caja
@@ -57,7 +57,7 @@ function cajaDocker (nombre) {
   const r = sh('docker', ['run', '-d', '--rm', '--network', 'host',
     '-v', `${ECO}:/eco:ro`, '--tmpfs', '/data:exec,mode=0700',
     '-w', '/eco', '--name', id, IMAGEN, 'sleep', 'infinity'])
-  if (r.status !== 0) throw new Error(`no se pudo crear la caja ${nombre}: ${r.stderr || r.stdout}`)
+  if (r.status !== 0) throw new Error(`could not create box ${nombre}: ${r.stderr || r.stdout}`)
 
   return {
     nombre, motor: 'docker', id, home: '/data',
@@ -88,7 +88,7 @@ function cajaDocker (nombre) {
       const dir = path.posix.dirname(rutaEnCaja)
       const r = spawnSync('docker', ['exec', '-i', id, 'sh', '-lc', `mkdir -p ${dir} && cat > ${rutaEnCaja}`],
         { input: contenido, encoding: 'utf8' })
-      if (r.status !== 0) throw new Error('no se pudo escribir en la caja: ' + (r.stderr || ''))
+      if (r.status !== 0) throw new Error('could not write into the box: ' + (r.stderr || ''))
     },
     leer (rutaEnCaja) {
       const r = sh('docker', ['exec', id, 'cat', rutaEnCaja])
@@ -135,6 +135,6 @@ function cajaLocal (nombre) {
 }
 
 /** Destruye todas las cajas creadas. */
-export function destruirCajas () {
+export function destroyBoxes () {
   for (const c of cajas.splice(0)) { try { c.destruir() } catch (_) {} }
 }

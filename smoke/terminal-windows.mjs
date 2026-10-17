@@ -27,7 +27,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
-import { escenario, correr, startProxy, startVault, teardown, tmpDir, ROOT } from './lib/harness.js'
+import { scenario, runScenarios, startProxy, startVault, teardown, tmpDir, ROOT } from './lib/harness.js'
 
 const VERBOSE = process.argv.includes('--verbose')
 const log = (m) => { if (VERBOSE) console.log(m) }
@@ -67,7 +67,7 @@ async function esperar (fn, { timeoutMs = 60000, cada = 1000, que = 'la condici�
     if (v) return v
     await sleep(cada)
   }
-  throw new Error('se agotó la espera de ' + (typeof que === 'function' ? que() : que))
+  throw new Error('timed out waiting for ' + (typeof que === 'function' ? que() : que))
 }
 
 async function enlazar (nombre) {
@@ -94,7 +94,7 @@ async function vistasDesdeB () {
 const dirVM = () => `${home}\\.dotrino\\agent\\terminal-agent\\${PERFIL}`
 const logVM = () => ps(`Get-Content -Tail 30 '${dirVM()}\\agent.log' -ErrorAction SilentlyContinue`).out
 
-escenario('la VM tiene Node y ningún agente de terminal corriendo', async () => {
+scenario('la VM tiene Node y ningún agente de terminal corriendo', async () => {
   const r = bien(ps('[Environment]::OSVersion.VersionString; node -v; $env:USERPROFILE'), 'entrar en la VM')
   const lines = r.out.trim().split(/\r?\n/)
   home = lines.at(-1).trim()
@@ -104,13 +104,13 @@ escenario('la VM tiene Node y ningún agente de terminal corriendo', async () =>
   assert.doesNotMatch(ps('Get-CimInstance Win32_Process -Filter "name=\'node.exe\'" | Select-Object -Expand CommandLine').out, /terminal-agent/, 'ya corre un agente de terminal')
 })
 
-escenario(INSTALLED ? 'el agente que ya tiene la VM está en el PATH' : `npm instala @dotrino/terminal-agent@${VERSION} con su PTY para Windows`, async () => {
+scenario(INSTALLED ? 'el agente que ya tiene la VM está en el PATH' : `npm instala @dotrino/terminal-agent@${VERSION} con su PTY para Windows`, async () => {
   if (!INSTALLED) bien(ps(`npm install -g @dotrino/terminal-agent@${VERSION} 2>&1 | Select-Object -Last 3`, { timeout: 400000 }), 'npm install -g')
   const r = bien(ps('(Get-Command dotrino-terminal.cmd).Source; $null = dotrino-terminal-agent.cmd --help'), 'los comandos en el PATH')
   console.log('    ' + r.out.trim().split(/\r?\n/)[0])
 })
 
-escenario('el perfil se enlaza y otra máquina (el host) arranca', async () => {
+scenario('el perfil se enlaza y otra máquina (el host) arranca', async () => {
   const dirA = await enlazar('windows-vm')
   const dirB = await enlazar('escritorio')
   // Desde la VM el host es la puerta de la red de libvirt: el enlace apunta ahí.
@@ -132,7 +132,7 @@ escenario('el perfil se enlaza y otra máquina (el host) arranca', async () => {
   b = { dir: dirB, proc }
 })
 
-escenario('`service install` desde SSH: el agente sigue corriendo al cerrar la sesión', async () => {
+scenario('`service install` desde SSH: el agente sigue corriendo al cerrar la sesión', async () => {
   const r = bien(ps(`dotrino-terminal.cmd service install --name ${PERFIL} 2>&1`), 'service install')
   console.log('    ' + r.out.trim().replace(/\r?\n/g, '\n    '))
   assert.match(r.out, /iniciar sesión en Windows|log in to Windows/)
@@ -142,7 +142,7 @@ escenario('`service install` desde SSH: el agente sigue corriendo al cerrar la s
   console.log('    ' + st.out.trim())
 })
 
-escenario('el host ve la VM y abre PowerShell en ella', async () => {
+scenario('el host ve la VM y abre PowerShell en ella', async () => {
   await esperar(async () => (await vistasDesdeB())?.list?.find((y) => y.name === 'windows-vm'), { timeoutMs: 90000, cada: 3000, que: () => 'que el host vea la VM\n' + logVM() })
   const { connectLocal } = await import(path.join(AGENTE, 'local.js'))
   const c = await connectLocal(b.dir)
@@ -155,11 +155,11 @@ escenario('el host ve la VM y abre PowerShell en ella', async () => {
   c.send({ type: 'input', data: 'Write-Output "desde-$(40+2)-$env:COMPUTERNAME"; $PSVersionTable.PSEdition\r' })
   const out = () => got.filter((m) => m.type === 'out' || m.type === 'replay').map((m) => m.data).join('')
   const m = await esperar(() => /desde-42-(\S+)/.exec(out()), { que: () => 'que PowerShell conteste desde la VM\n' + out() })
-  console.log(`    PowerShell contestó desde ${m[1]}`)
+  console.log(`    PowerShell answered from ${m[1]}`)
   c.close()
 })
 
-if (DESKTOP_ZIP) escenario('la app de escritorio abre en la sesión de Windows con el perfil, y su consola es PowerShell', async () => {
+if (DESKTOP_ZIP) scenario('la app de escritorio abre en la sesión de Windows con el perfil, y su consola es PowerShell', async () => {
   const zip = path.basename(DESKTOP_ZIP)
   const tmp = `${home.replace(/\\/g, '/')}/AppData/Local/Temp/${zip}`
   const r = spawnSync('scp', ['-o', 'BatchMode=yes', DESKTOP_ZIP, `${SSH_HOST}:${tmp}`], { encoding: 'utf8' })
@@ -194,19 +194,19 @@ if (DESKTOP_ZIP) escenario('la app de escritorio abre en la sesión de Windows c
   const shot = spawnSync('virsh', ['-c', 'qemu:///system', 'screenshot', 'win11', ppm], { encoding: 'utf8' })
   if (shot.status === 0) {
     spawnSync('convert', [ppm, path.join(OUT, 'win-app.png')])
-    console.log('    captura: ' + path.join(OUT, 'win-app.png'))
+    console.log('    screenshot: ' + path.join(OUT, 'win-app.png'))
   }
   ps('Stop-Process -Name dotrino-terminal-desktop -Force -ErrorAction SilentlyContinue; Unregister-ScheduledTask -TaskName DotrinoDesktopSmoke -Confirm:$false')
 })
 
-escenario('la ventana de la VM, por la tubería con nombre, ve al host', async () => {
+scenario('la ventana de la VM, por la tubería con nombre, ve al host', async () => {
   const r = await esperar(() => { const x = ps(`dotrino-terminal.cmd machines --name ${PERFIL} 2>&1`); return /escritorio/.test(x.out) ? x : null }, { timeoutMs: 60000, cada: 3000, que: () => 'que la VM vea al host\n' + ps(`dotrino-terminal.cmd machines --name ${PERFIL} 2>&1`).out + logVM() })
   console.log('    ' + r.out.trim().replace(/\r?\n/g, '\n    '))
   const rec = JSON.parse(ps(`Get-Content '${dirVM()}\\terminal.pipe'`).out.trim())
   assert.match(rec.pipe, /^\\\\\.\\pipe\\dotrino-terminal-[0-9a-f]{32}$/)
 })
 
-escenario('al iniciar sesión corre lo apuntado en la entrada de Run, tal cual', async () => {
+scenario('al iniciar sesión corre lo apuntado en la entrada de Run, tal cual', async () => {
   const entry = ps(`(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run').'DotrinoTerminalAgent-${PERFIL}'`).out.trim()
   console.log('    ' + entry)
   assert.match(entry, /supervise --name winvm$/)
@@ -227,25 +227,25 @@ escenario('al iniciar sesión corre lo apuntado en la entrada de Run, tal cual',
   }, { timeoutMs: 90000, cada: 3000, que: () => 'que el host vuelva a ver la VM\n' + logVM() })
 })
 
-escenario('`service uninstall` lo quita y no queda ningún agente', async () => {
+scenario('`service uninstall` lo quita y no queda ningún agente', async () => {
   const r = bien(ps(`dotrino-terminal.cmd service uninstall --name ${PERFIL} --yes 2>&1`), 'service uninstall')
   console.log('    ' + r.out.trim())
   assert.match(ps(`dotrino-terminal.cmd service status --name ${PERFIL} 2>&1`).out, /no tiene servicio|has no service/)
   await esperar(() => !/terminal-agent/.test(ps('Get-CimInstance Win32_Process -Filter "name=\'node.exe\'" | Select-Object -Expand CommandLine').out), { timeoutMs: 15000, que: 'que no quede ningún agente' })
 })
 
-console.log(`\nSMOKE · la terminal en Windows 11: agente ${INSTALLED ? 'ya instalado' : VERSION + ' de npm'}, servicio, PowerShell desde otra máquina\n`)
+console.log(`\nSMOKE · the terminal on Windows 11: agent ${INSTALLED ? 'already installed' : VERSION + ' from npm'}, service, PowerShell from another machine\n`)
 const parar = () => { try { b?.proc.kill('SIGTERM') } catch (_) {} }
 try {
   proxy = await startProxy({ log })
   vault = await startVault({ proxyUrl: proxy.url, name: 'boveda', log })
-  console.log(`  proxy  ${proxy.url} (la VM lo ve en ws://${HOST}:${proxy.port})\n`)
-  const ok = await correr()
+  console.log(`  proxy  ${proxy.url} (the VM sees it at ws://${HOST}:${proxy.port})\n`)
+  const ok = await runScenarios()
   parar()
   await teardown()
   process.exit(ok ? 0 : 1)
 } catch (e) {
-  console.error('\nno se pudo montar el escenario:', e?.stack || e)
+  console.error('\ncould not set up the scenario:', e?.stack || e)
   parar()
   await teardown()
   process.exit(1)

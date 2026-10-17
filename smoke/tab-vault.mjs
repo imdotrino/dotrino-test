@@ -19,13 +19,13 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { escenario, correr, startProxy, teardown, servirEstatico, ROOT } from './lib/harness.js'
+import { scenario, runScenarios, startProxy, teardown, serveStatic, ROOT } from './lib/harness.js'
 
 const { chromium } = await import('playwright')
 
-escenario('la pestaña es la bóveda del binario y la consola la administra', async () => {
+scenario('la pestaña es la bóveda del binario y la consola la administra', async () => {
   const proxy = await startProxy()
-  const iframe = await servirEstatico(path.join(ROOT, 'dotrino-identity', 'vault'))
+  const iframe = await serveStatic(path.join(ROOT, 'dotrino-identity', 'vault'))
   // La página que embebe, en OTRO origen: es lo que hace vault.dotrino.com con id.dotrino.com.
   const raiz = fs.mkdtempSync(path.join(os.tmpdir(), 'boveda-pestana-'))
   fs.writeFileSync(path.join(raiz, 'index.html'), `<!doctype html><meta charset=utf-8><body>
@@ -34,7 +34,7 @@ let n = 0; const pend = new Map()
 addEventListener('message', (e) => { const m = e.data; if (m?._cci && m.type === 'response' && pend.has(m.id)) { const r = pend.get(m.id); pend.delete(m.id); m.error ? r.rej(new Error(typeof m.error === 'string' ? m.error : (m.error.message || JSON.stringify(m.error)))) : r.res(m.result) } })
 window.rpc = (method, params = {}) => new Promise((res, rej) => { const id = ++n; pend.set(id, { res, rej }); document.getElementById('f').contentWindow.postMessage({ _cci: true, type: 'request', id, method, params }, '*') })
 </script>`)
-  const pagina = await servirEstatico(raiz)
+  const pagina = await serveStatic(raiz)
 
   const perfil = fs.mkdtempSync(path.join(os.tmpdir(), 'boveda-pestana-chrome-'))
   const ctx = await chromium.launchPersistentContext(perfil, { headless: true })
@@ -75,4 +75,4 @@ window.rpc = (method, params = {}) => new Promise((res, rej) => { const id = ++n
   }
 })
 
-try { await correr() } finally { await teardown() }
+try { await runScenarios() } finally { await teardown() }

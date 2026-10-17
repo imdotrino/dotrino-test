@@ -16,13 +16,13 @@
  * pedir. Así que el teléfono timbraba otra vez. El dueño, textual: «sigo aprobando y
  * aprobando».
  *
- *   node smoke/aprobaciones.mjs [--verbose]
+ *   node smoke/approvals.mjs [--verbose]
  */
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { escenario, correr, startProxy, startVault, teardown } from './lib/harness.js'
+import { scenario, runScenarios, startProxy, startVault, teardown } from './lib/harness.js'
 
 const VERBOSE = process.argv.includes('--verbose')
 const log = (m) => { if (VERBOSE) console.log(m) }
@@ -40,12 +40,12 @@ async function esperar (fn, { timeoutMs = 25000, que = 'la condición' } = {}) {
     if (v) return v
     await sleep(200)
   }
-  throw new Error('se agotó la espera de ' + que)
+  throw new Error('timed out waiting for ' + que)
 }
 
 const tmp = (n) => fs.mkdtempSync(path.join(os.tmpdir(), 'apv-' + n + '-'))
 
-escenario('arranca el ecosistema y se guarda una variable privada', async () => {
+scenario('arranca el ecosistema y se guarda una variable privada', async () => {
   proxy = await startProxy({ log })
   vault = await startVault({ proxyUrl: proxy.url, name: 'boveda', log })
   // La variable entra ANTES de que exista el servicio: es el caso que rompía, porque su
@@ -55,7 +55,7 @@ escenario('arranca el ecosistema y se guarda una variable privada', async () => 
   estado.dirAprobador = tmp('aprobador')
 })
 
-escenario('se enrolan el SERVICIO y el APROBADOR, con la bóveda abierta', async () => {
+scenario('se enrolan el SERVICIO y el APROBADOR, con la bóveda abierta', async () => {
   const { enrollService, enrollWithVault } = await import('../../dotrino-vault/lib/src/service.js')
 
   // El servicio del cajón `demo`.
@@ -80,7 +80,7 @@ escenario('se enrolan el SERVICIO y el APROBADOR, con la bóveda abierta', async
     'y SIN llevarse las claves solo: pedir permiso es el defecto, no una marca que alguien recuerde poner')
 })
 
-escenario('el aparato que aprueba recibe el permiso `aprueba`', async () => {
+scenario('el aparato que aprueba recibe el permiso `aprueba`', async () => {
   const acta = await vault.members()
   const m = (acta.members || []).find((x) => x.pub === estado.aprobadorPub)
   await vault.caps(estado.aprobadorPub, [...new Set([...(m?.caps || []), 'approve'])])
@@ -109,7 +109,7 @@ escenario('el aparato que aprueba recibe el permiso `aprueba`', async () => {
  * servicio existiera, así que su envoltura hay que hacérsela después. Si falta, el servicio
  * recibe un paquete que no puede abrir — y eso es exactamente lo que se veía en producción.
  */
-escenario('el servicio abre lo que se escribió ANTES de que él existiera', async () => {
+scenario('el servicio abre lo que se escribió ANTES de que él existiera', async () => {
   const { fetchSecrets } = await import('../../dotrino-vault/lib/src/service.js')
   // Todavía con la bóveda abierta y con `unattended`, para medir SOLO la envoltura.
   const acta = await vault.members()
@@ -124,14 +124,14 @@ escenario('el servicio abre lo que se escribió ANTES de que él existiera', asy
   await vault.caps(estado.servicioPub, (m2?.caps || []).filter((c) => c !== 'unattended'))
 })
 
-escenario('se pone contraseña y se CIERRA la bóveda', async () => {
+scenario('se pone contraseña y se CIERRA la bóveda', async () => {
   const r = await vault.profile('password-set', { password: FRASE })
   assert.ok(!r.error, 'la contraseña se guarda: ' + (r.error || ''))
   const l = await vault.profile('lock')
   assert.ok(!l.error, 'y se cierra: ' + (l.error || ''))
 })
 
-escenario('CERRADA: el pedido llega al que aprueba — el timbre NO necesita la maestra', async () => {
+scenario('CERRADA: el pedido llega al que aprueba — el timbre NO necesita la maestra', async () => {
   const { fetchSecrets } = await import('../../dotrino-vault/lib/src/service.js')
 
   // El servicio pide. Con la bóveda cerrada y sin `unattended`, esto tiene que quedar
@@ -139,7 +139,7 @@ escenario('CERRADA: el pedido llega al que aprueba — el timbre NO necesita la 
   let pendiente = null
   const pidiendo = fetchSecrets({
     dir: estado.dirServicio, ns: 'demo',
-    onPending: (p) => { pendiente = p; log('[servicio] pendiente ' + p.id) }
+    onPending: (p) => { pendiente = p; log('[service] pending ' + p.id) }
   }).then((v) => ({ v }), (e) => ({ e }))
 
   await esperar(() => pendiente, { que: 'que la bóveda conteste «pendiente»' })
@@ -155,7 +155,7 @@ escenario('CERRADA: el pedido llega al que aprueba — el timbre NO necesita la 
   estado.pidiendo = pidiendo
 })
 
-escenario('el que aprueba dice que sí, y el servicio abre lo que le llega', async () => {
+scenario('el que aprueba dice que sí, y el servicio abre lo que le llega', async () => {
   const { requestApproval } = await import('../../dotrino-identity/vault/remote.js')
   const { device, cert } = estado.aprobador
   const comun = { master: vault.iss, proxy: proxy.url, device, cert }
@@ -173,7 +173,7 @@ escenario('el que aprueba dice que sí, y el servicio abre lo que le llega', asy
   assert.equal(r.v.TOKEN, 'valor-secreto', 'y es el valor que guardó el dueño')
 })
 
-escenario('un aparato SIN envoltura corta y dice qué hacer: no vuelve a hacer timbrar', async () => {
+scenario('un aparato SIN envoltura corta y dice qué hacer: no vuelve a hacer timbrar', async () => {
   const { isFinal } = await import('../../dotrino-vault/lib/src/service.js')
   // La regla, aparte: reintentar un cajón sin envoltura solo sirve para que el teléfono
   // timbre otra vez y el dueño apruebe otra vez. No lo arregla ninguna aprobación.
@@ -181,7 +181,7 @@ escenario('un aparato SIN envoltura corta y dice qué hacer: no vuelve a hacer t
   assert.equal(isFinal(new Error('the vault did not reply')), false, 'lo transitorio sí se reintenta')
 })
 
-correr().finally(async () => {
+runScenarios().finally(async () => {
   await teardown()
   for (const d of [estado.dirServicio, estado.dirAprobador]) {
     if (d) try { fs.rmSync(d, { recursive: true, force: true }) } catch (_) {}

@@ -15,15 +15,15 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { escenario, correr, startProxy, teardown, servirEstatico, ROOT } from './lib/harness.js'
+import { scenario, runScenarios, startProxy, teardown, serveStatic, ROOT } from './lib/harness.js'
 
 const { chromium } = await import('playwright')
 const { sealBackup, openBackup } = await import(path.join(ROOT, 'dotrino-vault', 'lib', 'src', 'core', 'backup.js'))
 const PWD = 'contraseña del respaldo de prueba'
 
-escenario('la bóveda-pestaña exporta e importa su respaldo, con choques', async () => {
+scenario('la bóveda-pestaña exporta e importa su respaldo, con choques', async () => {
   const proxy = await startProxy()
-  const iframe = await servirEstatico(path.join(ROOT, 'dotrino-identity', 'vault'))
+  const iframe = await serveStatic(path.join(ROOT, 'dotrino-identity', 'vault'))
   const raiz = fs.mkdtempSync(path.join(os.tmpdir(), 'respaldo-pestana-'))
   fs.writeFileSync(path.join(raiz, 'index.html'), `<!doctype html><meta charset=utf-8><body>
 <iframe id=f src="${iframe.url}/index.html?proxy=${proxy.url}"></iframe><script>
@@ -31,7 +31,7 @@ let n = 0; const pend = new Map()
 addEventListener('message', (e) => { const m = e.data; if (m?._cci && m.type === 'response' && pend.has(m.id)) { const r = pend.get(m.id); pend.delete(m.id); m.error ? r.rej(Object.assign(new Error(typeof m.error === 'string' ? m.error : (m.error.message || JSON.stringify(m.error))), { code: m.error?.code || null })) : r.res(m.result) } })
 window.rpc = (method, params = {}) => new Promise((res, rej) => { const id = ++n; pend.set(id, { res, rej }); document.getElementById('f').contentWindow.postMessage({ _cci: true, type: 'request', id, method, params }, '*') })
 </script>`)
-  const pagina = await servirEstatico(raiz)
+  const pagina = await serveStatic(raiz)
 
   const perfil = fs.mkdtempSync(path.join(os.tmpdir(), 'respaldo-pestana-chrome-'))
   const ctx = await chromium.launchPersistentContext(perfil, { headless: true })
@@ -87,4 +87,4 @@ window.rpc = (method, params = {}) => new Promise((res, rej) => { const id = ++n
   }
 })
 
-try { await correr() } finally { await teardown() }
+try { await runScenarios() } finally { await teardown() }

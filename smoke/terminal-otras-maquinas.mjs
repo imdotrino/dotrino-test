@@ -13,7 +13,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
-import { escenario, correr, startProxy, startVault, teardown, tmpDir, ROOT } from './lib/harness.js'
+import { scenario, runScenarios, startProxy, startVault, teardown, tmpDir, ROOT } from './lib/harness.js'
 
 const VERBOSE = process.argv.includes('--verbose')
 const log = (m) => { if (VERBOSE) console.log(m) }
@@ -36,7 +36,7 @@ async function esperar (fn, { timeoutMs = 30000, que = 'la condición' } = {}) {
     if (v) return v
     await sleep(150)
   }
-  throw new Error('se agotó la espera de ' + que)
+  throw new Error('timed out waiting for ' + que)
 }
 
 async function levantar (nombre) {
@@ -57,17 +57,17 @@ async function ventana () {
   const { connectLocal } = await import(path.join(AGENTE, 'local.js'))
   const c = await connectLocal(maquinas.a.dir)
   const got = []
-  c.on('message', (m) => { got.push(m); log('[ventana] ' + JSON.stringify(m).slice(0, 160)) })
+  c.on('message', (m) => { got.push(m); log('[window] ' + JSON.stringify(m).slice(0, 160)) })
   return { c, got, last: (type) => got.filter((m) => m.type === type).pop(), out: () => got.filter((m) => m.type === 'out' || m.type === 'replay').map((m) => m.data).join('') }
 }
 
-escenario('dos máquinas se enlazan a la misma bóveda y arrancan su agente', async () => {
+scenario('dos máquinas se enlazan a la misma bóveda y arrancan su agente', async () => {
   await levantar('a')
   await levantar('b')
 })
 
 let idB = null
-escenario('desde A se ve que B está encendida (y A no se lista a sí misma)', async () => {
+scenario('desde A se ve que B está encendida (y A no se lista a sí misma)', async () => {
   const w = await ventana()
   w.c.send({ type: 'machines' })
   await esperar(() => w.last('machines') || w.last('fail'), { que: 'la lista de máquinas' })
@@ -81,7 +81,7 @@ escenario('desde A se ve que B está encendida (y A no se lista a sí misma)', a
   w.c.close()
 })
 
-escenario('una ventana de A abre una consola EN B y la usa', async () => {
+scenario('una ventana de A abre una consola EN B y la usa', async () => {
   const w = await ventana()
   w.c.send({ type: 'via', machine: idB })
   w.c.send({ type: 'open', cols: 80, rows: 24 })
@@ -94,7 +94,7 @@ escenario('una ventana de A abre una consola EN B y la usa', async () => {
   w.c.close()
 })
 
-escenario('el panel de A lista la consola de B, y una ventana nueva la retoma', async () => {
+scenario('el panel de A lista la consola de B, y una ventana nueva la retoma', async () => {
   const p = await ventana()
   const lista = await esperar(async () => {
     p.c.send({ type: 'machines' })
@@ -119,7 +119,7 @@ escenario('el panel de A lista la consola de B, y una ventana nueva la retoma', 
   p.c.close()
 })
 
-escenario('B sigue atendiendo a los demás: A no le quitó nada al conectarse como cliente', async () => {
+scenario('B sigue atendiendo a los demás: A no le quitó nada al conectarse como cliente', async () => {
   // El agente de A tiene DOS conexiones con su llave (la suya de agente y la de cliente).
   // B le abre una consola a A, que es el camino inverso, para ver que A sigue recibiendo.
   const { connectLocal } = await import(path.join(AGENTE, 'local.js'))
@@ -133,7 +133,7 @@ escenario('B sigue atendiendo a los demás: A no le quitó nada al conectarse co
   c.close()
 })
 
-escenario('con la bóveda apagada y sin acta guardada, una máquina nueva DICE que no pudo preguntar', async () => {
+scenario('con la bóveda apagada y sin acta guardada, una máquina nueva DICE que no pudo preguntar', async () => {
   // Lo que pasaba: contestaba una lista vacía, igual que si no hubiera otras máquinas.
   const { enroll } = await import(path.join(AGENTE, 'link.js'))
   const { connectLocal } = await import(path.join(AGENTE, 'local.js'))
@@ -157,7 +157,7 @@ escenario('con la bóveda apagada y sin acta guardada, una máquina nueva DICE q
   assert.equal(r.code, 'no-acta', JSON.stringify(r))
 })
 
-escenario('una máquina enlazada SIN RED abre igual sus consolas locales', async () => {
+scenario('una máquina enlazada SIN RED abre igual sus consolas locales', async () => {
   // Lo que pasaba: el agente moría al no llegar al proxio, y no se abría ni una consola de aquí.
   const { connectLocal } = await import(path.join(AGENTE, 'local.js'))
   const dir = tmpDir('ta-sinred')
@@ -181,18 +181,18 @@ escenario('una máquina enlazada SIN RED abre igual sus consolas locales', async
   c.close()
 })
 
-console.log('\nSMOKE · las consolas de otra máquina desde una ventana de esta, todo en local\n')
+console.log('\nSMOKE · another machine\'s consoles from a window on this one, all local\n')
 const parar = () => { for (const m of Object.values(maquinas)) { try { m.proc.kill('SIGTERM') } catch (_) {} } }
 try {
   proxy = await startProxy({ log })
   vault = await startVault({ proxyUrl: proxy.url, name: 'boveda', log })
   console.log(`  proxy  ${proxy.url}\n`)
-  const ok = await correr()
+  const ok = await runScenarios()
   parar()
   await teardown()
   process.exit(ok ? 0 : 1)
 } catch (e) {
-  console.error('\nno se pudo montar el escenario:', e?.stack || e)
+  console.error('\ncould not set up the scenario:', e?.stack || e)
   parar()
   await teardown()
   process.exit(1)

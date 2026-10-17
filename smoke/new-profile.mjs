@@ -10,8 +10,8 @@
  *   npm run smoke:perfil-nuevo [-- --verbose]
  */
 import assert from 'node:assert/strict'
-import { escenario, correr, startProxy, teardown } from './lib/harness.js'
-import { crearCaja, destruirCajas } from './lib/caja.js'
+import { scenario, runScenarios, startProxy, teardown } from './lib/harness.js'
+import { createBox, destroyBoxes } from './lib/box.js'
 import { parseInvite } from '../../dotrino-vault/lib/src/invite.js'
 
 const VERBOSE = process.argv.includes('--verbose')
@@ -28,7 +28,7 @@ const salidaBoveda = []
 async function esperar (fn, { timeoutMs = 25000, que = 'la condición' } = {}) {
   const t = Date.now() + timeoutMs
   while (Date.now() < t) { const v = await fn(); if (v) return v; await sleep(200) }
-  throw new Error('se agotó la espera de ' + que)
+  throw new Error('timed out waiting for ' + que)
 }
 
 const ctl = (args) => {
@@ -41,25 +41,25 @@ const ctl = (args) => {
 // Una foto de verdad, pequeña: el perfil guarda la foto como data URI.
 const FOTO = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 
-escenario('la bóveda arranca como binario', async () => {
+scenario('la bóveda arranca como binario', async () => {
   proxy = await startProxy()
-  boveda = crearCaja('boveda-perfil')
+  boveda = createBox('boveda-perfil')
   if (boveda.motor === 'docker') boveda.exec('ldconfig -p | grep -q libatomic || (apt-get update -qq && apt-get install -y -qq libatomic1) >/dev/null 2>&1')
-  boveda.lanzar(BINARIO, { env: { ...ENV, PROXY_URL: proxy.url }, onLinea: (l) => { salidaBoveda.push(l); log('[bóveda] ' + l) } })
+  boveda.lanzar(BINARIO, { env: { ...ENV, PROXY_URL: proxy.url }, onLinea: (l) => { salidaBoveda.push(l); log('[vault] ' + l) } })
   await esperar(() => /corriendo/.test(ctl('status')), { que: 'que la bóveda arranque' })
 })
 
-escenario('se crea el perfil «Crifa» y queda como el activo, como hizo el dueño', async () => {
+scenario('se crea el perfil «Crifa» y queda como el activo, como hizo el dueño', async () => {
   ctl('profile add Crifa')
   ctl('profile use Crifa')
   await esperar(() => /\*\s+Crifa/.test(ctl('status')), { que: 'que Crifa sea el perfil activo' })
 })
 
-escenario('se empareja un aparato (la identidad del navegador) con Crifa', async () => {
+scenario('se empareja un aparato (la identidad del navegador) con Crifa', async () => {
   const lineas = []
   boveda.lanzar(`${BINARIO} --ctl pair`, { env: ENV, onLinea: (l) => { lineas.push(l.trim()); log('[pair] ' + l) } })
   const qr = await esperar(() => { for (const l of lineas) { const o = l.length > 20 && parseInvite(l); if (o?.sn) return o } return null }, { que: 'la invitación' })
-  aparato = crearCaja('aparato-perfil')
+  aparato = createBox('aparato-perfil')
   let codigo = null
   aparato.lanzar(`node --input-type=module -e "$GUION"`, {
     env: {
@@ -69,7 +69,7 @@ escenario('se empareja un aparato (la identidad del navegador) con Crifa', async
         const id = await Identity.connect({ dir: '/data/identidad' })
         id.onVault((e) => { if (e.phase === 'challenge') console.log('CODE:' + e.code) })
         await id.enrollDevice(JSON.parse(process.env.QR), { label: 'navegador', join: 'new' })
-        console.log('ENROLADO')
+        console.log('ENROLLED')
         await id.updateMe({ nickname: 'Crifa', avatar: '${FOTO}', email: 'crifa@example.com', telefono: '0999999999' })
         for (let i = 0; i < 60; i++) {
           const s = await id.profilePushState()
@@ -81,7 +81,7 @@ escenario('se empareja un aparato (la identidad del navegador) con Crifa', async
       `
     },
     onLinea: (l) => {
-      log('[aparato] ' + l)
+      log('[device] ' + l)
       const m = /CODE:(\d+)/.exec(l); if (m && !codigo) { codigo = m[1]; ctl('approve ' + codigo) }
       if (l.startsWith('EMPUJE:')) aparato.empuje = JSON.parse(l.slice(7))
     }
@@ -90,7 +90,7 @@ escenario('se empareja un aparato (la identidad del navegador) con Crifa', async
   assert.equal(aparato.empuje.ok, true, 'el aparato dice que su perfil llegó a la bóveda: ' + JSON.stringify(aparato.empuje))
 })
 
-escenario('la bóveda ENSEÑA el perfil que le mandó el aparato (dotrino-vault me)', async () => {
+scenario('la bóveda ENSEÑA el perfil que le mandó el aparato (dotrino-vault me)', async () => {
   const out = ctl('me')
   assert.match(out, /nombre\s*:\s*Crifa/, 'el nombre que puso el aparato:\n' + out)
   assert.match(out, /foto\s*:\s*sí/, 'la foto que subió el aparato:\n' + out)
@@ -100,13 +100,13 @@ escenario('la bóveda ENSEÑA el perfil que le mandó el aparato (dotrino-vault 
   assert.doesNotMatch(out, /0999999999/, 'y su valor no se enseña:\n' + out)
 })
 
-escenario('un SEGUNDO aparato que entra a la cuenta BAJA el perfil (nombre, foto y datos)', async () => {
+scenario('un SEGUNDO aparato que entra a la cuenta BAJA el perfil (nombre, foto y datos)', async () => {
   // El caso del teléfono del dueño (2026-09-25): emparejó la app con la bóveda abierta y el
   // perfil salió vacío, sin foto ni datos, aunque la bóveda los tenía.
   const lineas = []
   boveda.lanzar(`${BINARIO} --ctl pair`, { env: ENV, onLinea: (l) => { lineas.push(l.trim()); log('[pair2] ' + l) } })
   const qr = await esperar(() => { for (const l of lineas) { const o = l.length > 20 && parseInvite(l); if (o?.sn) return o } return null }, { que: 'la invitación' })
-  const otro = crearCaja('aparato2-perfil')
+  const otro = createBox('aparato2-perfil')
   let codigo = null
   let visto = null
   otro.lanzar(`node --input-type=module -e "$GUION"`, {
@@ -117,7 +117,7 @@ escenario('un SEGUNDO aparato que entra a la cuenta BAJA el perfil (nombre, foto
         const id = await Identity.connect({ dir: '/data/identidad2' })
         id.onVault((e) => { if (e.phase === 'challenge') console.log('CODE:' + e.code) })
         const r = await id.enrollDevice(JSON.parse(process.env.QR), { label: 'telefono', join: 'new' })
-        console.log('ENROLADO:' + JSON.stringify(r?.join || null))
+        console.log('ENROLLED:' + JSON.stringify(r?.join || null))
         let me = null
         for (let i = 0; i < 40; i++) {
           me = await id.getMe()
@@ -129,7 +129,7 @@ escenario('un SEGUNDO aparato que entra a la cuenta BAJA el perfil (nombre, foto
       `
     },
     onLinea: (l) => {
-      log('[aparato2] ' + l)
+      log('[device2] ' + l)
       const m = /CODE:(\d+)/.exec(l); if (m && !codigo) { codigo = m[1]; ctl('approve ' + codigo) }
       if (l.startsWith('ME2:')) visto = JSON.parse(l.slice(4))
     }
@@ -140,7 +140,7 @@ escenario('un SEGUNDO aparato que entra a la cuenta BAJA el perfil (nombre, foto
   assert.equal(visto.email, 'crifa@example.com', 'un dato público: ' + JSON.stringify(visto))
 })
 
-escenario('con el perfil CERRADO enseña lo público igual, y no lista los nombres de lo privado', async () => {
+scenario('con el perfil CERRADO enseña lo público igual, y no lista los nombres de lo privado', async () => {
   // Es como estaba el de Crifa en la máquina del dueño: 🔒 tras 5 min sin usarse.
   // Un perfil SIN contraseña no se cierra de verdad (no hay con qué): se le pone una, como el
   // de Crifa en la máquina del dueño, que salía 🔒. La pide por TERMINAL (actual vacía, nueva y
@@ -154,11 +154,11 @@ escenario('con el perfil CERRADO enseña lo público igual, y no lista los nombr
   assert.doesNotMatch(out, /privados\s*:/, 'sin nombres de datos privados con el candado puesto:\n' + out)
 })
 
-const ok = await correr()
+const ok = await runScenarios()
 if (!ok) {
-  console.log('\n--- log de la bóveda (Crifa) ---')
+  console.log('\n--- vault log (Crifa) ---')
   for (const l of salidaBoveda.filter((l) => /Crifa|profile|record|recovery/i.test(l)).slice(-25)) console.log('  ' + l)
 }
-destruirCajas()
+destroyBoxes()
 await teardown()
 process.exit(ok ? 0 : 1)

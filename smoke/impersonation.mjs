@@ -6,8 +6,8 @@
  * desde sus repos) e intenta, de propósito, lo que un atacante haría. Cada escenario es un
  * ataque que DEBE fallar: si algún día uno pasa, esto se pone en rojo.
  *
- *   node smoke/suplantacion.mjs            (o `npm run smoke:suplantacion`)
- *   node smoke/suplantacion.mjs --verbose  (con los logs del proxio y de la bóveda)
+ *   node smoke/impersonation.mjs            (o `npm run smoke:suplantacion`)
+ *   node smoke/impersonation.mjs --verbose  (con los logs del proxio y de la bóveda)
  *
  * Los cuatro ataques:
  *   A · PERSONA FALSA EN EL PROXIO — fabricar un acta con el `profileId` de la víctima para
@@ -20,7 +20,7 @@
  */
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { escenario, correr, startProxy, startVault, teardown, ROOT, tmpDir } from './lib/harness.js'
+import { scenario, runScenarios, startProxy, startVault, teardown, ROOT, tmpDir } from './lib/harness.js'
 
 const VERBOSE = process.argv.includes('--verbose')
 const log = (m) => { if (VERBOSE) console.log(m) }
@@ -51,7 +51,7 @@ async function enrolar (label) {
 // ---------------------------------------------------------------------------
 // A · PERSONA FALSA EN EL PROXIO
 // ---------------------------------------------------------------------------
-escenario('A · fabricar un acta con el profileId de la víctima NO ata su perfil en el proxio', async () => {
+scenario('A · fabricar un acta con el profileId de la víctima NO ata su perfil en el proxio', async () => {
   const victima = vault.acta()               // la víctima: el perfil de la bóveda
   const { WebSocketProxyClient } = await import(path.join(ROOT, 'dotrino-proxy-client/src/index.js'))
 
@@ -103,7 +103,7 @@ escenario('A · fabricar un acta con el profileId de la víctima NO ata su perfi
 // ---------------------------------------------------------------------------
 // B · FIRMANTE NO ADMITIDO
 // ---------------------------------------------------------------------------
-escenario('B · un aparato sin cert válido no consigue que la bóveda firme por la persona', async () => {
+scenario('B · un aparato sin cert válido no consigue que la bóveda firme por la persona', async () => {
   const legit = await enrolar('legit-b')
   const res = await legit
 
@@ -144,7 +144,7 @@ escenario('B · un aparato sin cert válido no consigue que la bóveda firme por
 // ---------------------------------------------------------------------------
 // C · PERMISO RETIRADO EN EL ACTA, PERO EL PAPEL SIGUE VIGENTE
 // ---------------------------------------------------------------------------
-escenario('C · quitarle `sign` en el acta corta la firma AUNQUE el cert de 30 días siga vigente', async () => {
+scenario('C · quitarle `sign` en el acta corta la firma AUNQUE el cert de 30 días siga vigente', async () => {
   const res = await (await enrolar('legit-c'))
 
   // Con el permiso puesto, la bóveda le firma lo que pida.
@@ -176,7 +176,7 @@ escenario('C · quitarle `sign` en el acta corta la firma AUNQUE el cert de 30 d
 // ---------------------------------------------------------------------------
 // D · REPLAY DE HANDSHAKE contra el agente de la terminal
 // ---------------------------------------------------------------------------
-escenario('D · reproducir un saludo capturado NO abre sesión con el agente (frescura ±5 min)', async () => {
+scenario('D · reproducir un saludo capturado NO abre sesión con el agente (frescura ±5 min)', async () => {
   // El agente remoto, con un transporte DE MENTIRA inyectado (seam documentado de
   // `startRemoteAgent`): así se prueba el guardia anti-replay sin red ni PTY. El guardia de
   // frescura corre ANTES de verificar la cadena, así que el saludo viejo se rechaza por su
@@ -244,17 +244,17 @@ async function signWithDevHS (cliente, raSign, ts) {
 }
 
 // ----- arranque -----
-console.log('\nSUPLANTACIÓN · terminal + vault (proxio + bóveda + cliente real, todo local)\n')
+console.log('\nIMPERSONATION · terminal + vault (proxy + vault + real client, all local)\n')
 try {
   proxy = await startProxy({ log })
-  console.log(`  proxio local en ${proxy.url}`)
+  console.log(`  local proxy at ${proxy.url}`)
   vault = await startVault({ proxyUrl: proxy.url, name: 'boveda', log })
-  console.log(`  bóveda con identidad ${vault.state.fingerprint}\n`)
-  const ok = await correr()
+  console.log(`  vault with identity ${vault.state.fingerprint}\n`)
+  const ok = await runScenarios()
   await teardown()
   process.exit(ok ? 0 : 1)
 } catch (e) {
-  console.error('\nno se pudo montar el escenario:', e?.stack || e)
+  console.error('\ncould not set up the scenario:', e?.stack || e)
   await teardown()
   process.exit(1)
 }

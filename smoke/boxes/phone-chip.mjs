@@ -52,7 +52,7 @@ core.onVaultEvent((e) => { if (e.phase === 'challenge') say('CODE', e.code); if 
 const me0 = await core.handlers.getMe()
 say('PUB', me0.publickey)
 say('PRIVADAS_EN_IDB', [...idb.values()].filter((r) => r.privateKey).length)
-const r = await core.handlers.vaultPair({ qr: JSON.parse(process.env.QR), label: 'telefono-chip', join: 'new' })
+const r = await core.handlers.vaultPair({ qr: JSON.parse(process.env.QR), label: 'phone-chip', join: 'new' })
 say('EMPAREJADO', { deviceId: r.deviceId, joined: r.join?.joined, pub: (await core.handlers.getMe()).publickey })
 
 let me = null

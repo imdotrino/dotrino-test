@@ -11,7 +11,7 @@
  * necesita credenciales.
  *
  *   npm run smoke:gestor
- *   node smoke/gestor.mjs --verbose      (con los logs y sin ocultar el navegador)
+ *   node smoke/password-manager.mjs --verbose      (con los logs y sin ocultar el navegador)
  *
  * Requiere:  cd dotrino-vault/web && npm run build
  *            cd dotrino-passmanager/extension && node build.mjs
@@ -21,7 +21,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { escenario, correr, startProxy, teardown, servirEstatico, ROOT } from './lib/harness.js'
+import { scenario, runScenarios, startProxy, teardown, serveStatic, ROOT } from './lib/harness.js'
 
 const VERBOSE = process.argv.includes('--verbose')
 // `--logs` enseña los logs SIN abrir el navegador: en una máquina sin pantalla,
@@ -67,7 +67,7 @@ async function abrirConsola () {
     window.addEventListener('load', esperar)
   })
   page.on('console', (m) => { if (LOGS || m.type() === 'error') console.log('   [consola] ' + m.text()) })
-  page.on('pageerror', (e) => console.log('   [consola!] ' + e.message))
+  page.on('pageerror', (e) => console.log('   [console!] ' + e.message))
   await page.goto(`${webConsola.url}/vault?vault=${encodeURIComponent(iframeUrl())}&proxy=${encodeURIComponent(proxy.url)}`)
   await page.waitForSelector('[data-testid="vault-at"][data-where="self"]', { timeout: 40000 })
   // El mostrador tiene que estar ATENDIENDO, no solo declarado: el botón que da el código
@@ -91,7 +91,7 @@ const pedir = (page, op, payload) => page.evaluate(([op, payload]) => new Promis
 // Lo que se comparte entre escenarios: emparejar una vez y usarlo después.
 const estado = { consola: null, popup: null }
 
-escenario('la extensión se enlaza a la bóveda de la pestaña', async () => {
+scenario('la extensión se enlaza a la bóveda de la pestaña', async () => {
   const consola = await abrirConsola()
   estado.consola = consola
 
@@ -133,7 +133,7 @@ escenario('la extensión se enlaza a la bóveda de la pestaña', async () => {
     await popup.waitForTimeout(1000)
   }
   if (st?.profile?.kind !== 'linked') {
-    console.log('   [aviso] el popup dice:',
+    console.log('   [notice] the popup says:',
       JSON.stringify(await popup.locator('.error').allInnerTexts().catch(() => [])))
   }
   assert.equal(st?.profile?.kind, 'linked', 'el perfil activo vive fuera de la extensión')
@@ -166,7 +166,7 @@ escenario('la extensión se enlaza a la bóveda de la pestaña', async () => {
   await consola.locator('[data-testid="password-device"]').first().waitFor({ timeout: 40000 })
 })
 
-escenario('lo que la extensión guarda queda en la bóveda de la pestaña', async () => {
+scenario('lo que la extensión guarda queda en la bóveda de la pestaña', async () => {
   const { popup, consola } = estado
   const entrada = {
     title: 'localhost', sites: ['localhost'], name: 'La de la pestaña',
@@ -187,7 +187,7 @@ escenario('lo que la extensión guarda queda en la bóveda de la pestaña', asyn
     'la bóveda enseña la entrada entre las suyas, leída de su propio almacén')
 })
 
-escenario('buscar y rellenar van por el proxio, y solo lo privado se pregunta', async () => {
+scenario('buscar y rellenar van por el proxio, y solo lo privado se pregunta', async () => {
   const { popup, consola } = estado
 
   const hay = (await pedir(popup, 'find', { url: 'https://localhost/entrar' }))?.result || []
@@ -229,7 +229,7 @@ escenario('buscar y rellenar van por el proxio, y solo lo privado se pregunta', 
     'y sin preguntar: la aprobación es del APARATO (§2.0)')
 })
 
-escenario('editar desde el gestor cambia lo de la bóveda, sin traerse lo privado', async () => {
+scenario('editar desde el gestor cambia lo de la bóveda, sin traerse lo privado', async () => {
   const { popup, consola } = estado
 
   // Es lo que hace el gestor al guardar: un `patch`, que fusiona DENTRO de la bóveda.
@@ -253,7 +253,7 @@ escenario('editar desde el gestor cambia lo de la bóveda, sin traerse lo privad
     'y lo privado sigue marcado: el patch no lo tocó')
 })
 
-escenario('los dominios y el buscador del gestor también funcionan enlazados', async () => {
+scenario('los dominios y el buscador del gestor también funcionan enlazados', async () => {
   const { popup } = estado
   const sitios = (await pedir(popup, 'sites'))?.result || []
   assert.ok(sitios.some((s) => s.site === 'localhost'), 'la bóveda dice en qué dominios hay algo')
@@ -264,7 +264,7 @@ escenario('los dominios y el buscador del gestor también funcionan enlazados', 
     'y buscar por texto llega a la entrada aunque no estés en su sitio')
 })
 
-escenario('con la pestaña en segundo plano, la bóveda AVISA en vez de callarse', async () => {
+scenario('con la pestaña en segundo plano, la bóveda AVISA en vez de callarse', async () => {
   const { popup, consola } = estado
 
   // El interruptor está a la vista, y no se pide el permiso solo al abrir: un navegador
@@ -302,25 +302,25 @@ escenario('con la pestaña en segundo plano, la bóveda AVISA en vez de callarse
 
 // ---------- arranque ----------
 
-console.log('\nSMOKE · la extensión con la bóveda de PESTAÑA, todo en local\n')
+console.log('\nSMOKE · the extension with the TAB vault, all local\n')
 if (!fs.existsSync(path.join(CONSOLA, 'index.html'))) {
-  console.error('Falta el build de la consola:  cd dotrino-vault/web && npm run build\n')
+  console.error('Missing the console build:  cd dotrino-vault/web && npm run build\n')
   process.exit(2)
 }
 if (!fs.existsSync(path.join(EXT, 'src/vendor/passmanager/index.js'))) {
-  console.error('Falta el vendor de la extensión:  cd dotrino-passmanager/extension && node build.mjs\n')
+  console.error('Missing the extension vendor:  cd dotrino-passmanager/extension && node build.mjs\n')
   process.exit(2)
 }
 try {
   const { chromium } = await import('playwright')
   proxy = await startProxy({ log })
-  webConsola = await servirEstatico(CONSOLA, { spa: true })
-  webIframe = await servirEstatico(IFRAME)
-  webSitio = await servirEstatico(SITIO)
+  webConsola = await serveStatic(CONSOLA, { spa: true })
+  webIframe = await serveStatic(IFRAME)
+  webSitio = await serveStatic(SITIO)
   console.log(`  proxy     ${proxy.url}`)
   console.log(`  consola   ${webConsola.url}/vault`)
-  console.log(`  identidad ${webIframe.url}`)
-  console.log(`  sitio     ${webSitio.url}\n`)
+  console.log(`  identity  ${webIframe.url}`)
+  console.log(`  site      ${webSitio.url}\n`)
 
   // Una extensión solo se carga en un contexto PERSISTENTE: no hay `newContext` que la
   // acepte. Y el service worker de MV3 es lo que da su id.
@@ -340,15 +340,15 @@ try {
 
   const sw = contexto.serviceWorkers()[0] || await contexto.waitForEvent('serviceworker', { timeout: 20000 })
   extId = new URL(sw.url()).host
-  console.log(`  extensión ${extId}\n`)
+  console.log(`  extension ${extId}\n`)
 
-  const ok = await correr()
+  const ok = await runScenarios()
   await contexto?.close()
   await rm(perfilDir, { recursive: true, force: true })
   await teardown()
   process.exit(ok ? 0 : 1)
 } catch (e) {
-  console.error('\nno se pudo montar el escenario:', e?.stack || e)
+  console.error('\ncould not set up the scenario:', e?.stack || e)
   try { await contexto?.close() } catch (_) {}
   if (perfilDir) await rm(perfilDir, { recursive: true, force: true }).catch(() => {})
   await teardown()

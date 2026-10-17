@@ -48,7 +48,7 @@ export async function waitPort (port, timeoutMs = 15000) {
     if (ok) return true
     await sleep(150)
   }
-  throw new Error(`nada escuchando en el puerto ${port} tras ${timeoutMs} ms`)
+  throw new Error(`nothing listening on port ${port} after ${timeoutMs} ms`)
 }
 
 const procs = []
@@ -150,7 +150,7 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
   }
   if (!state?.iss) {
     if (contenedor) spawnSync('docker', ['rm', '-f', contenedor], { stdio: 'ignore' })
-    throw Object.assign(new Error(`la bóveda ${name} no arrancó:\n` + lines.join('')), { lines })
+    throw Object.assign(new Error(`vault ${name} did not start:\n` + lines.join('')), { lines })
   }
 
   const writeReq = (file, obj) => fs.writeFileSync(path.join(dir, file), channel.encrypt(JSON.stringify(obj)), { mode: 0o600 })
@@ -188,7 +188,7 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
         if (s?.iss && s.pid === child.pid) return s
         await sleep(200)
       }
-      throw new Error(`la bóveda ${name} no volvió a arrancar:\n` + lines.join(''))
+      throw new Error(`vault ${name} did not restart:\n` + lines.join(''))
     },
     /**
      * `dotrino-vault pair` → devuelve el QR. Con `service` es `pair --service <ns>`: el cert
@@ -204,7 +204,7 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
         if (p?.qr) return p.qr
         await sleep(120)
       }
-      throw new Error('la bóveda no publicó el emparejamiento')
+      throw new Error('the vault did not publish the pairing')
     },
     /** Espera a que un dispositivo pida enrolarse y devuelve su deviceId. */
     async waitPending (timeoutMs = 15000) {
@@ -214,7 +214,7 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
         if (p?.deviceId) return p.deviceId
         await sleep(150)
       }
-      throw new Error('ningún dispositivo pidió enrolarse')
+      throw new Error('no device asked to enroll')
     },
     /** `dotrino-vault approve <código>`. */
     approve (code) { writeReq('approve-request.json', { code: String(code) }); signal('SIGUSR2') },
@@ -234,7 +234,7 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
         if (d?.at) return d
         await sleep(120)
       }
-      throw new Error(`la bóveda no contestó a la operación de perfil «${op}»`)
+      throw new Error(`the vault did not answer the profile operation «${op}»`)
     },
 
     /** `dotrino-vault reject <deviceId>`. */
@@ -259,7 +259,7 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
         if (d?.at) return d
         await sleep(150)
       }
-      throw new Error('la bóveda no volcó su acta')
+      throw new Error('the vault did not dump its record')
     },
     /** `dotrino-vault caps <ID> …` → cambia permisos de un miembro. */
     async caps (pub, caps) {
@@ -289,7 +289,7 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
         }
         await sleep(100)
       }
-      throw new Error(`la bóveda no contestó a «logins ${op}»`)
+      throw new Error(`the vault did not answer «logins ${op}»`)
     },
     async loginsAdd (user, password, { label = 'equipo prestado', caps = ['sign', 'read', 'store'] } = {}) {
       const pedir = (op, extra) => this.logins(op, extra)
@@ -349,7 +349,7 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
         if (d?.at && d.at !== antes) return d
         await sleep(120)
       }
-      throw new Error(`el daemon no contestó a «${op}»`)
+      throw new Error(`the daemon did not answer «${op}»`)
     },
     /** `dotrino-vault devices` → volcado de delegaciones. */
     async devices (timeoutMs = 8000) {
@@ -362,7 +362,7 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
         if (d?.at) return d
         await sleep(150)
       }
-      throw new Error('la bóveda no volcó sus dispositivos')
+      throw new Error('the vault did not dump its devices')
     },
     /**
      * El acta que la bóveda guarda en su disco. El archivo va CIFRADO EN REPOSO y ligado a
@@ -415,7 +415,7 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
  * poder probarlos con un navegador de verdad sin salir de la máquina. Sin dependencias:
  * son cuatro tipos de archivo y una regla de respaldo para las rutas de la SPA.
  */
-export async function servirEstatico (raiz, { spa = false } = {}) {
+export async function serveStatic (raiz, { spa = false } = {}) {
   const http = await import('node:http')
   const TIPOS = {
     '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
@@ -457,9 +457,9 @@ export async function teardown () {
 // ----- runner mínimo (sin dependencias: esto tiene que correr en cualquier lado) -----
 
 const casos = []
-export const escenario = (nombre, fn) => casos.push({ nombre, fn })
+export const scenario = (nombre, fn) => casos.push({ nombre, fn })
 
-export async function correr () {
+export async function runScenarios () {
   let ok = 0; const fallos = []
   for (const c of casos) {
     const t0 = Date.now()
@@ -472,9 +472,9 @@ export async function correr () {
       console.log(`  ✖ ${c.nombre}\n      ${e?.message || e}`)
     }
   }
-  console.log(`\n  ${ok}/${casos.length} escenarios`)
+  console.log(`\n  ${ok}/${casos.length} scenarios`)
   if (fallos.length) {
-    console.log('\nDetalle:')
+    console.log('\nDetails:')
     for (const f of fallos) console.log(`\n[${f.nombre}]\n`, f.error?.stack || f.error)
   }
   return fallos.length === 0

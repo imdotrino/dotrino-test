@@ -14,12 +14,12 @@
  *   · `nodo-a` y `nodo-b` — dos máquinas, con el proxio del banco de pruebas en medio
  *     SOLO para presentarse.
  *
- *   node smoke/directo.mjs            (necesita Docker: sin dos cajas no hay dos máquinas)
- *   node smoke/directo.mjs --verbose
+ *   node smoke/direct.mjs            (necesita Docker: sin dos cajas no hay dos máquinas)
+ *   node smoke/direct.mjs --verbose
  */
 import assert from 'node:assert/strict'
-import { escenario, correr, startProxy, teardown } from './lib/harness.js'
-import { crearCaja, destruirCajas, elegirMotor } from './lib/caja.js'
+import { scenario, runScenarios, startProxy, teardown } from './lib/harness.js'
+import { createBox, destroyBoxes, pickEngine } from './lib/box.js'
 
 const VERBOSE = process.argv.includes('--verbose')
 const log = (m) => { if (VERBOSE) console.log(m) }
@@ -50,25 +50,25 @@ const token = await c.connect()
 console.log('TOKEN=' + token)
 
 if (rol === 'b') {
-  c.on('message', (_f, p) => console.log('RECIBIDO=' + JSON.stringify(p)))
+  c.on('message', (_f, p) => console.log('RECEIVED=' + JSON.stringify(p)))
   setInterval(() => {}, 1000)
 } else {
   // Esperar a que el otro exista antes de hablarle.
   await new Promise((r) => setTimeout(r, 4000))
   c.send(otro, { n: 1 })
-  console.log('ENVIADO=1 porProxio=' + porProxio)
+  console.log('SENT=1 viaProxy=' + porProxio)
   // El canal directo se pidió solo al mandar el primero.
   for (let i = 0; i < 80 && !c.isWebRTCOpen(otro); i++) await new Promise((r) => setTimeout(r, 500))
-  console.log('DIRECTO=' + c.isWebRTCOpen(otro))
+  console.log('DIRECT=' + c.isWebRTCOpen(otro))
   const antes = porProxio
   c.send(otro, { n: 2 })
-  console.log('ENVIADO=2 nuevosPorProxio=' + (porProxio - antes))
+  console.log('SENT=2 newViaProxy=' + (porProxio - antes))
   setInterval(() => {}, 1000)
 }
 `
 
 function caja (nombre) {
-  const c = crearCaja(nombre)
+  const c = createBox(nombre)
   const salida = []
   cajas[nombre] = { caja: c, salida }
   c.escribir('/data/nodo.mjs', GUION)
@@ -90,12 +90,12 @@ const esperar = async (b, re, que, ms = 60000) => {
     if (l) return re.exec(l)
     await sleep(200)
   }
-  throw new Error('se agotó la espera de ' + que + '\n  salida:\n    ' + b.salida.join('\n    '))
+  throw new Error('timed out waiting for ' + que + '\n  output:\n    ' + b.salida.join('\n    '))
 }
 
-escenario('dos máquinas Node, y las dos tienen WebRTC', async () => {
-  if (elegirMotor() !== 'docker') {
-    throw new Error('esto necesita Docker: en cajas locales los dos «nodos» comparten máquina y no probaría nada')
+scenario('dos máquinas Node, y las dos tienen WebRTC', async () => {
+  if (pickEngine() !== 'docker') {
+    throw new Error('this needs Docker: in local boxes both «nodes» share a machine and it would prove nothing')
   }
   proxy = await startProxy({ log })
   const a = caja('nodo-a')
@@ -111,10 +111,10 @@ escenario('dos máquinas Node, y las dos tienen WebRTC', async () => {
   }
 })
 
-escenario('el PRIMER mensaje va por el proxio: no se espera a negociar nada', async () => {
-  const m = await esperar(cajas['nodo-a'], /^ENVIADO=1 porProxio=(\d+)$/, 'el primer envío')
+scenario('el PRIMER mensaje va por el proxio: no se espera a negociar nada', async () => {
+  const m = await esperar(cajas['nodo-a'], /^SENT=1 viaProxy=(\d+)$/, 'el primer envío')
   assert.equal(m[1], '1', 'salió por el proxio, que es lo que hay en ese momento')
-  const r = await esperar(cajas['nodo-b'], /^RECIBIDO=(.+)$/, 'que B lo reciba')
+  const r = await esperar(cajas['nodo-b'], /^RECEIVED=(.+)$/, 'que B lo reciba')
   assert.deepEqual(JSON.parse(r[1]), { n: 1 })
 })
 
@@ -123,18 +123,18 @@ escenario('el PRIMER mensaje va por el proxio: no se espera a negociar nada', as
  * sino que **el mensaje ya no pasa por el proxio**: lo primero podría ser cierto y lo
  * segundo no si el enrutado se rompiera.
  */
-escenario('y el SEGUNDO ya va directo, sin tocar el proxio', async () => {
-  const abierto = await esperar(cajas['nodo-a'], /^DIRECTO=(\w+)$/, 'que se abra el canal directo')
+scenario('y el SEGUNDO ya va directo, sin tocar el proxio', async () => {
+  const abierto = await esperar(cajas['nodo-a'], /^DIRECT=(\w+)$/, 'que se abra el canal directo')
   assert.equal(abierto[1], 'true', 'el canal directo se abre SOLO, sin que nadie lo pida')
 
-  const m = await esperar(cajas['nodo-a'], /^ENVIADO=2 nuevosPorProxio=(\d+)$/, 'el segundo envío')
+  const m = await esperar(cajas['nodo-a'], /^SENT=2 newViaProxy=(\d+)$/, 'el segundo envío')
   assert.equal(m[1], '0', 'el segundo mensaje NO pasó por el proxio')
 
-  const recibidos = cajas['nodo-b'].salida.filter((l) => l.startsWith('RECIBIDO='))
-  await esperar(cajas['nodo-b'], /^RECIBIDO=.*"n":2/, 'que B reciba el segundo')
+  const recibidos = cajas['nodo-b'].salida.filter((l) => l.startsWith('RECEIVED='))
+  await esperar(cajas['nodo-b'], /^RECEIVED=.*"n":2/, 'que B reciba el segundo')
   assert.ok(recibidos.length >= 1, 'y llegó igual, por el otro camino')
 })
 
-await correr()
-destruirCajas()
+await runScenarios()
+destroyBoxes()
 await teardown()

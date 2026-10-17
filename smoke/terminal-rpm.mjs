@@ -17,7 +17,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
-import { escenario, correr, startProxy, startVault, teardown, tmpDir, ROOT } from './lib/harness.js'
+import { scenario, runScenarios, startProxy, startVault, teardown, tmpDir, ROOT } from './lib/harness.js'
 
 const VERBOSE = process.argv.includes('--verbose')
 const log = (m) => { if (VERBOSE) console.log(m) }
@@ -40,7 +40,7 @@ const pod = (args, opts = {}) => spawnSync('podman', args, { encoding: 'utf8', .
 /** Una orden en la caja, como el usuario `u` y con su pantalla. */
 function enCaja (cmd, { root = false, timeout = 60000 } = {}) {
   const r = pod(['exec', ...(root ? [] : ['-u', 'u']), '-e', 'HOME=/home/u', '-e', 'DISPLAY=:9', '-e', 'LANG=es_EC.UTF-8', '-e', 'XDG_RUNTIME_DIR=/tmp/run-u', '-w', '/home/u', CAJA, 'bash', '-c', cmd], { timeout })
-  log(`[caja] $ ${cmd}\n${r.stdout}${r.stderr}`)
+  log(`[box] $ ${cmd}\n${r.stdout}${r.stderr}`)
   return r
 }
 
@@ -51,7 +51,7 @@ async function esperar (fn, { timeoutMs = 40000, que = 'la condición' } = {}) {
     if (v) return v
     await sleep(500)
   }
-  throw new Error('se agotó la espera de ' + que)
+  throw new Error('timed out waiting for ' + que)
 }
 
 async function enlazar (nombre) {
@@ -87,7 +87,7 @@ async function abrirApp (perfil) {
   await esperar(() => enCaja('xdotool search --class dotrino 2>/dev/null | head -1').stdout.trim(), { que: `la ventana de la app\n${enCaja('cat /tmp/app.log').stdout}` })
 }
 
-escenario('la caja de Fedora arranca con el .rpm y el cliente de npm', async () => {
+scenario('la caja de Fedora arranca con el .rpm y el cliente de npm', async () => {
   fs.mkdirSync(OUT, { recursive: true })
   const r = pod(['run', '-d', '--rm', '--network', 'host', '--name', CAJA, IMAGEN, 'sleep', 'infinity'])
   assert.equal(r.status, 0, `falta la imagen ${IMAGEN}? ${r.stderr}`)
@@ -99,22 +99,22 @@ escenario('la caja de Fedora arranca con el .rpm y el cliente de npm', async () 
   assert.match(v, /dotrino-terminal-desktop-\d/)
 })
 
-escenario('SIN ENLAZAR: el cliente dice por qué no ve otras máquinas', async () => {
+scenario('SIN ENLAZAR: el cliente dice por qué no ve otras máquinas', async () => {
   const r = enCaja('dotrino-terminal machines 2>&1', { timeout: 60000 })
   assert.match(r.stdout, /enlaza|not linked|vault|bóveda/i, r.stdout)
 })
 
-escenario('SIN ENLAZAR: la app abre, y el panel dice que el perfil no está enlazado', async () => {
+scenario('SIN ENLAZAR: la app abre, y el panel dice que el perfil no está enlazado', async () => {
   await abrirApp('default')
   await sleep(9000)                                   // tres lecturas del panel
-  console.log('    captura: ' + captura('1-sin-enlazar'))
+  console.log('    screenshot: ' + captura('1-sin-enlazar'))
   abrirPanel()
   await sleep(1500)
-  console.log('    captura: ' + captura('1-sin-enlazar-abierto'))
+  console.log('    screenshot: ' + captura('1-sin-enlazar-abierto'))
   enCaja('pkill -f dotrino-terminal-desktop; pkill -f bin/cli.js; sleep 1')
 })
 
-escenario('dos máquinas: la caja (A) y un agente en el host (B), con una consola abierta', async () => {
+scenario('dos máquinas: la caja (A) y un agente en el host (B), con una consola abierta', async () => {
   const dirA = await enlazar('fedora')
   const dirB = await enlazar('escritorio')
   enCaja(`rm -rf ${PERFIL}/default`)
@@ -135,7 +135,7 @@ escenario('dos máquinas: la caja (A) y un agente en el host (B), con una consol
   c.close()
 })
 
-escenario('ENLAZADA: el cliente de la caja lista la otra máquina y su consola', async () => {
+scenario('ENLAZADA: el cliente de la caja lista la otra máquina y su consola', async () => {
   const r = await esperar(() => {
     const x = enCaja('dotrino-terminal machines 2>&1', { timeout: 60000 })
     return /escritorio/.test(x.stdout) ? x : null
@@ -144,34 +144,34 @@ escenario('ENLAZADA: el cliente de la caja lista la otra máquina y su consola',
   assert.match(r.stdout, /1 consolas?|1 consoles?/)
 })
 
-escenario('ENLAZADA: la app pinta la otra máquina en el panel (plegado y abierto)', async () => {
+scenario('ENLAZADA: la app pinta la otra máquina en el panel (plegado y abierto)', async () => {
   await abrirApp('default')
   // El panel pregunta por las otras máquinas cada pocas lecturas: se le da tiempo.
   await sleep(15000)
-  console.log('    captura: ' + captura('2-enlazada'))
+  console.log('    screenshot: ' + captura('2-enlazada'))
   abrirPanel()
   await sleep(1500)
-  console.log('    captura: ' + captura('2-enlazada-abierto'))
+  console.log('    screenshot: ' + captura('2-enlazada-abierto'))
   const estado = enCaja(`node -e '
     const net = require("net"); const s = net.connect("${PERFIL}/default/terminal.sock")
     s.on("data", (d) => { process.stdout.write(d); s.end() }); s.write(JSON.stringify({ type: "machines" }) + "\\n")
     setTimeout(() => process.exit(0), 5000)'`).stdout
   assert.match(estado, /"name":"escritorio"/, estado)
-  console.log('    registro de la app:\n      ' + enCaja('cat /tmp/app.log ~/.config/dotrino-terminal/desktop.log 2>/dev/null | tail -8').stdout.trim().replace(/\n/g, '\n      '))
+  console.log('    app log:\n      ' + enCaja('cat /tmp/app.log ~/.config/dotrino-terminal/desktop.log 2>/dev/null | tail -8').stdout.trim().replace(/\n/g, '\n      '))
 })
 
-escenario('una consola de la OTRA máquina abre en ESTA ventana, y se vuelve a la de aquí igual', async () => {
+scenario('una consola de la OTRA máquina abre en ESTA ventana, y se vuelve a la de aquí igual', async () => {
   const ventanas = () => enCaja('xdotool search --onlyvisible --class dotrino 2>/dev/null | wc -l').stdout.trim()
   const antes = ventanas()
   // El panel está abierto: la consola de «escritorio» es la fila bajo su nombre.
   enCaja('xdotool mousemove 70 245 click 1')
   await sleep(6000)
-  console.log('    captura: ' + captura('3-remota-en-esta-ventana'))
+  console.log('    screenshot: ' + captura('3-remota-en-esta-ventana'))
   assert.equal(ventanas(), antes, 'se abrió otra ventana')
   // La shell que contesta es la de la otra máquina: su carpeta de perfil no es la de la caja.
   enCaja('xdotool windowfocus $(xdotool search --onlyvisible --class dotrino | head -1); xdotool mousemove 600 300 click 1; sleep 1; xdotool type --delay 40 \'echo DIR=$DOTRINO_TERMINAL_PROFILE_DIR\'; xdotool key Return')
   await sleep(2500)
-  console.log('    captura: ' + captura('4-remota-escribiendo'))
+  console.log('    screenshot: ' + captura('4-remota-escribiendo'))
   const lista = async () => { const { connectLocal } = await import(path.join(AGENTE, 'local.js')); const c = await connectLocal(b.dir); const r = await new Promise((res) => { c.on('message', (m) => { if (m.type === 'consoles') res(m.list) }); c.send({ type: 'list' }) }); c.close(); return r }
   const enB = await lista()
   // Lo tecleado en la ventana llegó a la shell de la otra máquina, y la consola tomó el tamaño
@@ -184,7 +184,7 @@ escenario('una consola de la OTRA máquina abre en ESTA ventana, y se vuelve a l
   await sleep(1500)
   espia.send({ type: 'detach' }); espia.close()
   const pantalla = visto.filter((m) => m.type === 'replay' || m.type === 'out').map((m) => m.data).join('')
-  console.log(`    la consola de la otra máquina: ${enB[0].cols}×${enB[0].rows} · ${JSON.stringify(pantalla.slice(-120))}`)
+  console.log(`    the other machine\'s console: ${enB[0].cols}×${enB[0].rows} · ${JSON.stringify(pantalla.slice(-120))}`)
   assert.match(pantalla, new RegExp('DIR=' + b.dir.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')), 'lo tecleado no llegó a la otra máquina')
   assert.ok(enB[0].cols > 80, `la consola no tomó el tamaño de la ventana: ${enB[0].cols}×${enB[0].rows}`)
   assert.equal(enB.length, 1, 'no se creó otra consola en la otra máquina')
@@ -192,24 +192,24 @@ escenario('una consola de la OTRA máquina abre en ESTA ventana, y se vuelve a l
   // De vuelta a la de aquí, con un clic en su fila.
   enCaja('xdotool mousemove 70 132 click 1')
   await sleep(5000)
-  console.log('    captura: ' + captura('5-de-vuelta-en-la-local'))
+  console.log('    screenshot: ' + captura('5-de-vuelta-en-la-local'))
   assert.equal(ventanas(), antes, 'se abrió otra ventana al volver')
   const despues = await esperar(async () => { const l = await lista(); return l[0].viewers === 0 ? l : null }, { que: 'que la consola de la otra máquina quede suelta' })
   assert.equal(despues.length, 1, 'la consola de la otra máquina sigue viva')
 })
 
-console.log('\nSMOKE · el .rpm publicado, en Fedora, ve las consolas de otra máquina\n')
+console.log('\nSMOKE · the published .rpm, on Fedora, sees another machine\'s consoles\n')
 const parar = () => { try { b?.proc.kill('SIGTERM') } catch (_) {} pod(['rm', '-f', CAJA]) }
 try {
   proxy = await startProxy({ log })
   vault = await startVault({ proxyUrl: proxy.url, name: 'boveda', log })
-  console.log(`  proxy  ${proxy.url}\n  capturas en ${OUT}\n`)
-  const ok = await correr()
+  console.log(`  proxy  ${proxy.url}\n  screenshots in ${OUT}\n`)
+  const ok = await runScenarios()
   parar()
   await teardown()
   process.exit(ok ? 0 : 1)
 } catch (e) {
-  console.error('\nno se pudo montar el escenario:', e?.stack || e)
+  console.error('\ncould not set up the scenario:', e?.stack || e)
   parar()
   await teardown()
   process.exit(1)

@@ -2,7 +2,7 @@
  * LA EXTENSIÓN CON EL VAULT DEMONIO — la tercera vía, y la que no admite peros.
  *
  * Las otras dos ya están probadas: la bóveda de dentro de la extensión (en su propio
- * repo) y la bóveda de PESTAÑA (`smoke/gestor.mjs`). Esta es la de siempre: el daemon del
+ * repo) y la bóveda de PESTAÑA (`smoke/password-manager.mjs`). Esta es la de siempre: el daemon del
  * PC, encendido, con su bitácora y su política completa.
  *
  * **Aquí no hay timbre que valga.** El daemon es de alta disponibilidad: no hay que
@@ -14,7 +14,7 @@
  * pestaña enrolada. Aquí es la pestaña, que es lo que se puede levantar en local.
  *
  *   npm run smoke:demonio
- *   node smoke/demonio.mjs --logs        (con los logs, sin abrir el navegador)
+ *   node smoke/daemon.mjs --logs        (con los logs, sin abrir el navegador)
  *
  * Requiere:  cd dotrino-vault/web && npm run build
  *            cd dotrino-passmanager/extension && node build.mjs
@@ -24,7 +24,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { escenario, correr, startProxy, startVault, teardown, servirEstatico, ROOT } from './lib/harness.js'
+import { scenario, runScenarios, startProxy, startVault, teardown, serveStatic, ROOT } from './lib/harness.js'
 
 const VERBOSE = process.argv.includes('--verbose')
 const LOGS = VERBOSE || process.argv.includes('--logs')
@@ -60,7 +60,7 @@ const iframeUrl = () => `${webIframe.url}/?proxy=${encodeURIComponent(proxy.url)
 async function abrirConsola (hash = '', ruta = '/vault') {
   const page = await contexto.newPage()
   page.on('console', (m) => { if (LOGS || m.type() === 'error') console.log('   [consola] ' + m.text()) })
-  page.on('pageerror', (e) => console.log('   [consola!] ' + e.message))
+  page.on('pageerror', (e) => console.log('   [console!] ' + e.message))
   await page.goto(`${webConsola.url}${ruta}?vault=${encodeURIComponent(iframeUrl())}&proxy=${encodeURIComponent(proxy.url)}${hash}`)
   return page
 }
@@ -90,7 +90,7 @@ async function esperarLog (trozo, ms = 30000) {
     if (vault.log().includes(trozo)) return true
     await new Promise((r) => setTimeout(r, 300))
   }
-  throw new Error(`el daemon nunca dijo «${trozo}». Su salida:\n` + vault.log().slice(-1500))
+  throw new Error(`the daemon never said «${trozo}». Its output:\n` + vault.log().slice(-1500))
 }
 
 /** Los permisos de un miembro, sumando los que ya tenía: `caps` reemplaza la lista. */
@@ -104,7 +104,7 @@ async function darPermiso (pub, ...nuevos) {
 
 const estado = {}
 
-escenario('una pestaña se enrola en el demonio y queda como aparato que APRUEBA', async () => {
+scenario('una pestaña se enrola en el demonio y queda como aparato que APRUEBA', async () => {
   // El daemon no tiene pantalla: quien aprueba es otro aparato del acta con el permiso
   // `aprueba` — la app de Android, o una pestaña como esta.
   const qr = await vault.pair({ label: 'aprobador' })
@@ -117,7 +117,7 @@ escenario('una pestaña se enrola en el demonio y queda como aparato que APRUEBA
   assert.match(code, /^\d{6}$/, 'la pestaña enseña seis dígitos para teclear en la bóveda')
 
   const deviceId = await vault.waitPending()
-  log('[bóveda] pendiente: ' + deviceId)
+  log('[vault] pending: ' + deviceId)
   vault.approve(code)
   await page.waitForFunction(() => !document.querySelector('[data-testid="pair-code"]'),
     null, { timeout: 40000 })
@@ -133,7 +133,7 @@ escenario('una pestaña se enrola en el demonio y queda como aparato que APRUEBA
   assert.ok(caps.includes('approve'), 'y se le da el permiso de aprobar: ' + caps.join(' '))
 })
 
-escenario('la extensión se enlaza al demonio', async () => {
+scenario('la extensión se enlaza al demonio', async () => {
   const qr = await vault.pair({ label: 'extension' })
   const popup = await abrirPopup()
   estado.popup = popup
@@ -146,7 +146,7 @@ escenario('la extensión se enlaza al demonio', async () => {
   await popup.waitForSelector('[data-testid="pair-code"]', { timeout: 40000 })
   const code = (await popup.locator('[data-testid="pair-code"]').innerText()).trim()
   const deviceId = await vault.waitPending()
-  log('[bóveda] pendiente: ' + deviceId)
+  log('[vault] pending: ' + deviceId)
   vault.approve(code)
 
   let st = null
@@ -171,7 +171,7 @@ escenario('la extensión se enlaza al demonio', async () => {
   assert.ok(true, 'el daemon abre su mostrador de contraseñas')
 })
 
-escenario('guardar y leer lo público: sin preguntarle a nadie', async () => {
+scenario('guardar y leer lo público: sin preguntarle a nadie', async () => {
   const { popup } = estado
   const puesta = await pedir(popup, 'put', { entry: {
     title: 'banco.example', sites: ['banco.example'], name: 'La del banco',
@@ -195,7 +195,7 @@ escenario('guardar y leer lo público: sin preguntarle a nadie', async () => {
     'un dato público llega sin que nadie apruebe nada')
 })
 
-escenario('CON el permiso `unattended`, lo privado llega sin preguntar', async () => {
+scenario('CON el permiso `unattended`, lo privado llega sin preguntar', async () => {
   // El defecto se dio la vuelta en 0.79.0: SIN el permiso se pide aprobación. Que un
   // aparato se lleve claves privadas solo es ahora una concesión explícita, no lo que pasa
   // por omisión — antes nacía pudiendo y nadie elegía eso.
@@ -204,7 +204,7 @@ escenario('CON el permiso `unattended`, lo privado llega sin preguntar', async (
   assert.equal(abierta?.result?.secret, 'hunter2', 'la contraseña llega sin preguntar')
 })
 
-escenario('SIN el permiso, lo privado pasa por el APROBADOR', async () => {
+scenario('SIN el permiso, lo privado pasa por el APROBADOR', async () => {
   const { popup } = estado
 
   await vault.unattended(estado.extPub, false)
@@ -259,7 +259,7 @@ escenario('SIN el permiso, lo privado pasa por el APROBADOR', async () => {
   assert.ok(ms < 3000, `y sin volver a preguntar: llegó en ${ms} ms, sin que nadie pulsara nada`)
 })
 
-escenario('el gestor entero funciona contra el daemon', async () => {
+scenario('el gestor entero funciona contra el daemon', async () => {
   const { popup } = estado
 
   // Editar: nombre, un valor, quitar y cruzar de dominio, todo en un `patch`.
@@ -289,7 +289,7 @@ escenario('el gestor entero funciona contra el daemon', async () => {
   assert.equal(tras.some((e) => e.id === estado.id), false, 'y quitar una entrada la quita')
 })
 
-escenario('alta disponibilidad: nada se encola y nada tarda', async () => {
+scenario('alta disponibilidad: nada se encola y nada tarda', async () => {
   // El daemon está encendido siempre, así que ninguna de estas cinco tiene por qué
   // esperar a nadie. Si una tardara segundos, sería que se está encolando algo — que es
   // justo lo que aquí NO debe pasar.
@@ -301,10 +301,10 @@ escenario('alta disponibilidad: nada se encola y nada tarda', async () => {
   }
   const ms = Date.now() - t0
   assert.ok(ms < 5000, `cinco vueltas completas en ${ms} ms, sin esperar a nadie`)
-  console.log(`         (cinco idas y vueltas por el proxio en ${ms} ms)`)
+  console.log(`         (five round trips through the proxy in ${ms} ms)`)
 })
 
-escenario('la propia EXTENSIÓN puede ser el aparato que aprueba', async () => {
+scenario('la propia EXTENSIÓN puede ser el aparato que aprueba', async () => {
   const { popup } = estado
 
   // 1. El permiso de aprobar, también para la extensión (dueño, 2026-08-30).
@@ -402,21 +402,21 @@ escenario('la propia EXTENSIÓN puede ser el aparato que aprueba', async () => {
 
 // ---------- arranque ----------
 
-console.log('\nSMOKE · la extensión con el VAULT DEMONIO, todo en local\n')
+console.log('\nSMOKE · the extension with the DAEMON VAULT, all local\n')
 if (!fs.existsSync(path.join(CONSOLA, 'index.html'))) {
-  console.error('Falta el build de la consola:  cd dotrino-vault/web && npm run build\n')
+  console.error('Missing the console build:  cd dotrino-vault/web && npm run build\n')
   process.exit(2)
 }
 if (!fs.existsSync(path.join(EXT, 'src/vendor/passmanager/index.js'))) {
-  console.error('Falta el vendor de la extensión:  cd dotrino-passmanager/extension && node build.mjs\n')
+  console.error('Missing the extension vendor:  cd dotrino-passmanager/extension && node build.mjs\n')
   process.exit(2)
 }
 try {
   const { chromium } = await import('playwright')
   proxy = await startProxy({ log })
   vault = await startVault({ proxyUrl: proxy.url, name: 'daemon', log })
-  webConsola = await servirEstatico(CONSOLA, { spa: true })
-  webIframe = await servirEstatico(IFRAME)
+  webConsola = await serveStatic(CONSOLA, { spa: true })
+  webIframe = await serveStatic(IFRAME)
   console.log(`  proxy     ${proxy.url}`)
   console.log(`  daemon    pid ${vault.pid}`)
   console.log(`  consola   ${webConsola.url}/vault`)
@@ -433,18 +433,18 @@ try {
   })
   const sw = contexto.serviceWorkers()[0] || await contexto.waitForEvent('serviceworker', { timeout: 20000 })
   extId = new URL(sw.url()).host
-  console.log(`  extensión ${extId}\n`)
+  console.log(`  extension ${extId}\n`)
 
-  const ok = await correr()
+  const ok = await runScenarios()
   try { await contexto2?.close() } catch (_) {}
   if (perfilDir2) await rm(perfilDir2, { recursive: true, force: true }).catch(() => {})
-  if (!ok) console.log('\n--- lo que dijo el daemon ---\n' + vault.log().slice(-2600))
+  if (!ok) console.log('\n--- what the daemon said ---\n' + vault.log().slice(-2600))
   await contexto?.close()
   await rm(perfilDir, { recursive: true, force: true })
   await teardown()
   process.exit(ok ? 0 : 1)
 } catch (e) {
-  console.error('\nno se pudo montar el escenario:', e?.stack || e)
+  console.error('\ncould not set up the scenario:', e?.stack || e)
   try { await contexto?.close() } catch (_) {}
   if (perfilDir) await rm(perfilDir, { recursive: true, force: true }).catch(() => {})
   await teardown()

@@ -19,7 +19,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { escenario, correr, startProxy, startVault, teardown, servirEstatico, tmpDir, ROOT } from './lib/harness.js'
+import { scenario, runScenarios, startProxy, startVault, teardown, serveStatic, tmpDir, ROOT } from './lib/harness.js'
 
 const VERBOSE = process.argv.includes('--verbose')
 const log = (m) => { if (VERBOSE) console.log(m) }
@@ -52,7 +52,7 @@ async function esperar (fn, { timeoutMs = 20000, que = 'la condición' } = {}) {
     if (v) return v
     await sleep(150)
   }
-  throw new Error('se agotó la espera de ' + que)
+  throw new Error('timed out waiting for ' + que)
 }
 
 /** Lo que muestra el panel colapsado: los números y cuál está marcado. */
@@ -65,10 +65,10 @@ async function panel () {
 
 const consolas = () => agente.consoles.list()
 
-escenario('el navegador se empareja con la bóveda (como cualquier aparato)', async () => {
+scenario('el navegador se empareja con la bóveda (como cualquier aparato)', async () => {
   const qr = await vault.pair({ label: 'navegador' })
   const page = await contexto.newPage()
-  page.on('pageerror', (e) => log('[consola!] ' + e.message))
+  page.on('pageerror', (e) => log('[console!] ' + e.message))
   await page.goto(`${webConsola.url}/vault?vault=${encodeURIComponent(iframeUrl())}&proxy=${encodeURIComponent(proxy.url)}#vault=${b64url(qr)}`)
   const caja = page.locator('[data-testid="pair-code"] .digits')
   await caja.waitFor({ timeout: 30000 })
@@ -79,7 +79,7 @@ escenario('el navegador se empareja con la bóveda (como cualquier aparato)', as
   await page.close()
 })
 
-escenario('el agente de terminal se enrola en la bóveda y arranca', async () => {
+scenario('el agente de terminal se enrola en la bóveda y arranca', async () => {
   const { enroll } = await import(path.join(AGENTE, 'link.js'))
   const { startAgent } = await import(path.join(AGENTE, 'index.js'))
   dirAgente = tmpDir('terminal-agent')
@@ -90,7 +90,7 @@ escenario('el agente de terminal se enrola en la bóveda y arranca', async () =>
   assert.ok(agente.remote, 'con enlace, el agente atiende también a los otros aparatos')
 })
 
-escenario('la PWA encuentra la máquina y, sin consolas, abre una', async () => {
+scenario('la PWA encuentra la máquina y, sin consolas, abre una', async () => {
   pagina = await contexto.newPage()
   pagina.on('console', (m) => log('[pwa] ' + m.text()))
   pagina.on('pageerror', (e) => log('[pwa!] ' + e.message))
@@ -107,7 +107,7 @@ escenario('la PWA encuentra la máquina y, sin consolas, abre una', async () => 
   assert.ok(caja.height > 700 * 0.6, `y el alto (${caja.height} de 700)`)
 })
 
-escenario('«+» abre otra; clic en un número cambia a esa por la misma conexión', async () => {
+scenario('«+» abre otra; clic en un número cambia a esa por la misma conexión', async () => {
   await pagina.locator('.side [data-act="new"]').click()
   await esperar(async () => (await consolas()).length === 2, { que: 'la segunda consola' })
   await esperar(async () => (await panel()).on === '2', { que: 'que marque la 2' })
@@ -123,7 +123,7 @@ escenario('«+» abre otra; clic en un número cambia a esa por la misma conexi�
 // proxio, que es lo que hay; a partir de ahí lo de la consola va por el canal directo. Se
 // mide en la página con las estadísticas del pilar, que cuentan los bytes por el camino por
 // el que pasaron de verdad.
-escenario('lo de la consola va por el canal directo, no por el proxio', async () => {
+scenario('lo de la consola va por el canal directo, no por el proxio', async () => {
   const medir = () => pagina.evaluate(async () => {
     const out = []
     for (const c of globalThis[Symbol.for('dotrino.transports')] || []) {
@@ -138,14 +138,14 @@ escenario('lo de la consola va por el canal directo, no por el proxio', async ()
   await pagina.keyboard.type('seq 1 400\n')
   await esperar(async () => suma(await medir(), 'bytesIn', 'direct') > suma(antes, 'bytesIn', 'direct') + 1000, { que: 'que la salida de la consola llegue por el canal directo' })
   const despues = await medir()
-  log('  antes   ' + JSON.stringify(antes))
-  log('  después ' + JSON.stringify(despues))
+  log('  before  ' + JSON.stringify(antes))
+  log('  after   ' + JSON.stringify(despues))
   assert.ok(suma(despues, 'bytesOut', 'direct') > suma(antes, 'bytesOut', 'direct'), 'lo que se teclea sale por el canal directo')
   assert.equal(suma(despues, 'bytesOut', 'proxy'), suma(antes, 'bytesOut', 'proxy'), 'y nada de eso sale por el proxio')
   assert.equal(suma(despues, 'bytesIn', 'proxy'), suma(antes, 'bytesIn', 'proxy'), 'ni entra por él')
 })
 
-escenario('ACTIVIDAD: el panel dice qué consola está trabajando y cuál terminó', async () => {
+scenario('ACTIVIDAD: el panel dice qué consola está trabajando y cuál terminó', async () => {
   const { connectLocal } = await import(path.join(AGENTE, 'local.js'))
   const dos = (await consolas()).find((c) => c.n === 2)
   // Otra pantalla lanza en la 2 algo que se comporta como un agente: su título cambia cada
@@ -165,7 +165,7 @@ escenario('ACTIVIDAD: el panel dice qué consola está trabajando y cuál termin
   await esperar(async () => (await consolas()).find((c) => c.n === 2).viewers === 0, { que: 'que la 2 quede suelta' })
 })
 
-escenario('el TAMAÑO con tres a la vez: lo tiene quien lo fija (⤢) o el último que llegó; escribir no lo cambia', async () => {
+scenario('el TAMAÑO con tres a la vez: lo tiene quien lo fija (⤢) o el último que llegó; escribir no lo cambia', async () => {
   const { connectLocal } = await import(path.join(AGENTE, 'local.js'))
   const una = (await consolas()).find((c) => c.n === 1)
   const tam = async () => { const c = (await consolas()).find((x) => x.n === 1); return `${c.cols}x${c.rows}` }
@@ -215,7 +215,7 @@ escenario('el TAMAÑO con tres a la vez: lo tiene quien lo fija (⤢) o el últi
   await pagina.setViewportSize({ width: 900, height: 700 })
 })
 
-escenario('la × de la consola de esta pestaña pasa primero a otra, y luego la cierra', async () => {
+scenario('la × de la consola de esta pestaña pasa primero a otra, y luego la cierra', async () => {
   await pagina.locator('.side [data-act="expand"]').click()
   const mia = (await consolas()).find((c) => c.n === 1)
   await pagina.locator(`.side [data-kill="${mia.id}"]`).click()
@@ -226,7 +226,7 @@ escenario('la × de la consola de esta pestaña pasa primero a otra, y luego la 
   assert.equal(quedan[0].viewers, 1, 'y la pestaña pasó a ella en vez de quedarse sin consola')
 })
 
-escenario('sin el agente, la página dice que no puede conectar y enlaza la guía; no queda una pestaña colgada', async () => {
+scenario('sin el agente, la página dice que no puede conectar y enlaza la guía; no queda una pestaña colgada', async () => {
   agente.close(); agente = null
   await pagina.reload()
   // La pestaña que había se reabre sola al recargar; al no conectar, se quita y se dice.
@@ -238,28 +238,28 @@ escenario('sin el agente, la página dice que no puede conectar y enlaza la guí
   assert.equal(await pagina.locator('#machines pre, #machines code').count(), 0, 'sin bloques de comandos')
 })
 
-console.log('\nSMOKE · el panel de consolas de la PWA de terminal, todo en local\n')
+console.log('\nSMOKE · the console panel of the terminal PWA, all local\n')
 for (const [dir, como] of [[CONSOLA, 'cd dotrino-vault/web && npm run build'], [PWA, 'cd dotrino-terminal && npm run build']]) {
-  if (!fs.existsSync(path.join(dir, 'index.html'))) { console.error(`Falta un build. Hazlo con:  ${como}\n`); process.exit(2) }
+  if (!fs.existsSync(path.join(dir, 'index.html'))) { console.error(`Missing a build. Build it with:  ${como}\n`); process.exit(2) }
 }
 try {
   const { chromium } = await import('playwright')
   proxy = await startProxy({ log })
   vault = await startVault({ proxyUrl: proxy.url, name: 'boveda', log })
-  webConsola = await servirEstatico(CONSOLA, { spa: true })
-  webIframe = await servirEstatico(IFRAME)
-  webPwa = await servirEstatico(PWA, { spa: true })
+  webConsola = await serveStatic(CONSOLA, { spa: true })
+  webIframe = await serveStatic(IFRAME)
+  webPwa = await serveStatic(PWA, { spa: true })
   console.log(`  proxy  ${proxy.url}`)
   console.log(`  pwa    ${webPwa.url}/consoles\n`)
   navegador = await chromium.launch({ headless: !VERBOSE })
   contexto = await navegador.newContext({ locale: 'es-ES' })
-  const ok = await correr()
+  const ok = await runScenarios()
   try { agente?.close() } catch (_) {}
   await contexto?.close(); await navegador?.close()
   await teardown()
   process.exit(ok ? 0 : 1)
 } catch (e) {
-  console.error('\nno se pudo montar el escenario:', e?.stack || e)
+  console.error('\ncould not set up the scenario:', e?.stack || e)
   try { agente?.close() } catch (_) {}
   try { await contexto?.close(); await navegador?.close() } catch (_) {}
   await teardown()

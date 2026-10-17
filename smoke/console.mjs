@@ -11,18 +11,18 @@
  *   · `admin`   — el aparato al que el dueño le concede «administra»
  *   · `nuevo`   — el que entra, aprobado a distancia y sin pasar por el PC
  *
- *   node smoke/consola.mjs            (Docker si lo hay; si no, cajas locales)
- *   SMOKE_BACKEND=local node smoke/consola.mjs
- *   node smoke/consola.mjs --verbose
+ *   node smoke/console.mjs            (Docker si lo hay; si no, cajas locales)
+ *   SMOKE_BACKEND=local node smoke/console.mjs
+ *   node smoke/console.mjs --verbose
  *
  * Requiere el binario:  cd dotrino-vault && bash packaging/build.sh
  */
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { escenario, correr, startProxy, teardown, ROOT } from './lib/harness.js'
+import { scenario, runScenarios, startProxy, teardown, ROOT } from './lib/harness.js'
 import { pubkeyId } from '../../dotrino-identity/vault/capabilities.js'
-import { crearCaja, destruirCajas, elegirMotor, ECO } from './lib/caja.js'
+import { createBox, destroyBoxes, pickEngine, ECO } from './lib/box.js'
 import { parseInvite } from '../../dotrino-vault/lib/src/invite.js'
 
 const VERBOSE = process.argv.includes('--verbose')
@@ -44,7 +44,7 @@ async function esperar (fn, { timeoutMs = 25000, que = 'la condición' } = {}) {
     if (v) return v
     await sleep(200)
   }
-  throw new Error('se agotó la espera de ' + que)
+  throw new Error('timed out waiting for ' + que)
 }
 
 /** `AB12-CD34`, que es como lista la bóveda a una llave. */
@@ -56,7 +56,7 @@ async function idDe (pub) {
 // ---------- la bóveda: el binario, manejado con su CLI ----------
 
 async function levantarBoveda () {
-  boveda = crearCaja('boveda')
+  boveda = createBox('boveda')
   // El binario trae Node dentro pero espera `libatomic1` del sistema (lo destapó el smoke
   // de dispositivos en un Debian limpio; por eso el `.deb` la declara).
   if (boveda.motor === 'docker') {
@@ -65,10 +65,10 @@ async function levantarBoveda () {
   const salida = []
   boveda.lanzar(BINARIO, {
     env: { ...VAULT_ENV, PROXY_URL: proxy.url },
-    onLinea: (l) => { salida.push(l); log('[bóveda] ' + l) }
+    onLinea: (l) => { salida.push(l); log('[vault] ' + l) }
   })
   await esperar(() => salida.some((l) => l.includes('servicio listo')), { que: 'que la bóveda arranque' })
-    .catch(() => { throw new Error('la bóveda (binario) no arrancó:\n' + salida.join('\n')) })
+    .catch(() => { throw new Error('the vault (binary) did not start:\n' + salida.join('\n')) })
   // Sin `state.json`: desde 0.89 el canal local va cifrado con la clave de la CAJA, y
   // nadie de aquí lo usaba — que la bóveda dijera «servicio listo» ya es el arranque.
   return { salida }
@@ -290,13 +290,13 @@ async function correrGuion (nombre, guion, { env = {}, que = 'el guion' } = {}) 
       if (l.startsWith('ERR:')) salida = { ok: false, error: l.slice(4) }
     }
   })
-  await esperar(() => salida, { que }).catch(() => { throw new Error(`${nombre}: sin respuesta de ${que}:\n` + lineas.join('\n')) })
+  await esperar(() => salida, { que }).catch(() => { throw new Error(`${nombre}: no answer for ${que}:\n` + lineas.join('\n')) })
   return salida
 }
 
 /** Enrola un aparato en su propia caja, con el QR que le den, y lo deja escuchando avisos. */
 async function enrolarEnCaja (nombre, qr, { aprobar }) {
-  const caja = cajas[nombre] = crearCaja(nombre)
+  const caja = cajas[nombre] = createBox(nombre)
   caja.escribir('/data/enrolar.mjs', GUION_ENROLAR)
   let code = null; let ok = null; const lineas = []
   caja.lanzar('node /data/enrolar.mjs', {
@@ -309,10 +309,10 @@ async function enrolarEnCaja (nombre, qr, { aprobar }) {
   })
   // El código lo MUESTRA el aparato que entra; aquí hacemos de humano que lo lee.
   await esperar(() => code, { que: `el código que muestra «${nombre}»` })
-    .catch(() => { throw new Error(`${nombre} no mostró código:\n` + lineas.join('\n')) })
+    .catch(() => { throw new Error(`${nombre} showed no code:\n` + lineas.join('\n')) })
   await aprobar(code)
   await esperar(() => ok, { que: `que «${nombre}» termine de entrar` })
-    .catch(() => { throw new Error(`${nombre} no completó el emparejamiento:\n` + lineas.join('\n')) })
+    .catch(() => { throw new Error(`${nombre} did not finish pairing:\n` + lineas.join('\n')) })
 
   // Y se queda escuchando: los avisos hay que recibirlos, no suponerlos.
   caja.escribir('/data/escuchar.mjs', GUION_ESCUCHAR)
@@ -320,7 +320,7 @@ async function enrolarEnCaja (nombre, qr, { aprobar }) {
   caja.lanzar('node /data/escuchar.mjs', {
     env: { PROXY: proxy.url },
     onLinea: (l) => {
-      log(`[${nombre}·escucha] ` + l)
+      log(`[${nombre}·listen] ` + l)
       if (l === 'LISTO') listo = true
       if (l.startsWith('EVENT:')) eventos[nombre]?.push(JSON.parse(l.slice(6)))
     }
@@ -334,7 +334,7 @@ async function enrolarEnCaja (nombre, qr, { aprobar }) {
 let admin = null
 let nuevo = null
 
-escenario('la bóveda arranca como binario y el admin entra como un aparato normal', async () => {
+scenario('la bóveda arranca como binario y el admin entra como un aparato normal', async () => {
   await levantarBoveda()
   const qr = await emparejamientoDesdeElPC()
   admin = await enrolarEnCaja('admin', qr, { aprobar: (code) => ctl(`approve ${code}`) })
@@ -344,13 +344,13 @@ escenario('la bóveda arranca como binario y el admin entra como un aparato norm
   assert.ok(miembros().includes(await idDe(admin.pub)), 'la bóveda lo lista en el acta')
 })
 
-escenario('sin «administra», la consola remota le dice que no', async () => {
+scenario('sin «administra», la consola remota le dice que no', async () => {
   const r = await correrGuion('admin', GUION_ADMIN, { env: { ARGS: JSON.stringify({ op: 'pending' }) }, que: 'la respuesta a pending' })
   assert.equal(r.ok, false, 'no debería poder administrar')
   assert.match(r.error, /unauthorized/, r.error)
 })
 
-escenario('el dueño concede «administra» EN EL PC y el permiso llega renovando el cert', async () => {
+scenario('el dueño concede «administra» EN EL PC y el permiso llega renovando el cert', async () => {
   const id = await idDe(admin.pub)
   const salida = ctl(`caps ${id} +administra`)
   assert.equal(salida.status, 0, 'el CLI aceptó el cambio: ' + (salida.stderr || salida.stdout))
@@ -365,7 +365,7 @@ escenario('el dueño concede «administra» EN EL PC y el permiso llega renovand
   assert.ok(r.valor.scope.includes('vault:admin'), 'el cert nuevo estrena vault:admin: ' + r.valor.scope)
 })
 
-escenario('el papel viejo NO es una expulsión: cambiar permisos no borra el aparato', async () => {
+scenario('el papel viejo NO es una expulsión: cambiar permisos no borra el aparato', async () => {
   // El fallo, contado por el dueño: «le di permisos de admin al dispositivo y ahora
   // desapareció como que hubiera sido revocado». Cambiar permisos obliga a renovar, y
   // renovar retira el certificado anterior. Si al reaparecer con el papel viejo la bóveda
@@ -379,13 +379,13 @@ escenario('el papel viejo NO es una expulsión: cambiar permisos no borra el apa
   assert.match(miembros(), new RegExp(await idDe(admin.pub)), 'el aparato sigue en el acta:\n' + miembros())
 })
 
-escenario('ahora sí administra: ve la bitácora y lo pendiente', async () => {
+scenario('ahora sí administra: ve la bitácora y lo pendiente', async () => {
   const r = await correrGuion('admin', GUION_ADMIN, { env: { ARGS: JSON.stringify({ op: 'audit', limit: 10 }) }, que: 'la bitácora' })
   assert.ok(r.ok, 'debería poder leer la bitácora: ' + r.error)
   assert.ok(Array.isArray(r.valor.entries), 'devuelve entradas')
 })
 
-escenario('un admin NO puede crear otro admin ni emparejar servicios', async () => {
+scenario('un admin NO puede crear otro admin ni emparejar servicios', async () => {
   for (const scope of [['vault:admin'], ['vault:secrets:proxy']]) {
     const r = await correrGuion('admin', GUION_ADMIN, {
       env: { ARGS: JSON.stringify({ op: 'pair', scope }) }, que: 'la respuesta a pair'
@@ -397,7 +397,7 @@ escenario('un admin NO puede crear otro admin ni emparejar servicios', async () 
   assert.match(bitacora(), /forbidden-scope/, 'el rechazo queda auditado')
 })
 
-escenario('EL PASO CLAVE: el admin admite a un aparato nuevo SIN TOCAR EL PC', async () => {
+scenario('EL PASO CLAVE: el admin admite a un aparato nuevo SIN TOCAR EL PC', async () => {
   const r = await correrGuion('admin', GUION_ADMIN, {
     env: { ARGS: JSON.stringify({ op: 'pair', label: 'nuevo' }) }, que: 'la invitación remota'
   })
@@ -424,7 +424,7 @@ escenario('EL PASO CLAVE: el admin admite a un aparato nuevo SIN TOCAR EL PC', a
   assert.ok(b.includes(await idDe(admin.pub)), 'y con el aparato que la pidió:\n' + b)
 })
 
-escenario('administrar a distancia NO es invisible: el aviso llega firmado', async () => {
+scenario('administrar a distancia NO es invisible: el aviso llega firmado', async () => {
   // Esto es la contrapartida de delegar la administración: si un admin comprometido mete
   // un aparato, tiene que verse sin ir a mirar la bitácora.
   await esperar(() => eventos.admin.some((e) => e.ev === 'enrolled'), { que: 'el aviso de que entró alguien' })
@@ -439,7 +439,7 @@ escenario('administrar a distancia NO es invisible: el aviso llega firmado', asy
   // comprueba con el siguiente evento (más abajo, al quitarle «administra» al otro).
 })
 
-escenario('F4 — datos sensibles: el aparato guarda un sobre cerrado y lo recupera', async () => {
+scenario('F4 — datos sensibles: el aparato guarda un sobre cerrado y lo recupera', async () => {
   const puesto = await correrGuion('nuevo', GUION_SECRETO, {
     env: { ARGS: JSON.stringify({ method: 'secure.put', args: { meta: 'META-SELLADA', enc: 'VALOR-SELLADO' } }) },
     que: 'guardar el dato sensible'
@@ -464,7 +464,7 @@ escenario('F4 — datos sensibles: el aparato guarda un sobre cerrado y lo recup
   assert.ok(!raw.includes('VALOR-SELLADO'), 'el valor no queda en claro en el disco de la bóveda')
 })
 
-escenario('el perfil que editas en el aparato se ve en la bóveda (`dotrino-vault me`)', async () => {
+scenario('el perfil que editas en el aparato se ve en la bóveda (`dotrino-vault me`)', async () => {
   // Cambiar el apodo o la foto en un dispositivo tiene que llegar a la bóveda —es la copia
   // autoritativa— y el dueño tiene que poder COMPROBARLO desde su máquina. La foto va como
   // data-URI, igual que la manda la identidad de verdad.
@@ -494,7 +494,7 @@ escenario('el perfil que editas en el aparato se ve en la bóveda (`dotrino-vaul
   assert.match(b, /profileSet|guardó|store/i, 'la escritura queda en la bitácora:\n' + b)
 })
 
-escenario('un aparato ya emparejado SIGUE recibiendo el acta (sinceSeq)', async () => {
+scenario('un aparato ya emparejado SIGUE recibiendo el acta (sinceSeq)', async () => {
   // Un navegador que ya entró manda SIEMPRE `sinceSeq` para que le llegue la cadena que se
   // perdió. Esa rama llamaba a `identity.actaHistory`, que no existía en el envoltorio de
   // Node: TypeError síncrono, la bóveda contestaba error, y el aparato se quedaba con la
@@ -510,7 +510,7 @@ escenario('un aparato ya emparejado SIGUE recibiendo el acta (sinceSeq)', async 
   }
 })
 
-escenario('renombrar un dispositivo: el nombre con el que lo reconoces', async () => {
+scenario('renombrar un dispositivo: el nombre con el que lo reconoces', async () => {
   // El aparato entra con el nombre que le da la identidad al emparejarse —y si no le
   // pusiste uno, con TU apodo de ese momento—, así que se queda desfasado en cuanto te
   // renombras. Antes cambiarlo exigía revocarlo y volver a emparejarlo.
@@ -538,7 +538,7 @@ escenario('renombrar un dispositivo: el nombre con el que lo reconoces', async (
   assert.ok(sigue.ok, 'renombrar no le quitó permisos: ' + sigue.error)
 })
 
-escenario('renunciar: el aparato se quita firmar y la bóveda lo SELLA en el acta', async () => {
+scenario('renunciar: el aparato se quita firmar y la bóveda lo SELLA en el acta', async () => {
   // Renunciar no pasa por el Master (funciona con la bóveda apagada, que es cuando hace
   // falta), pero tiene que LLEGAR al acta: una renuncia que solo vive en el aparato no es
   // oponible a nadie —la bóveda le seguiría aceptando peticiones— y en el caso que la
@@ -557,7 +557,7 @@ escenario('renunciar: el aparato se quita firmar y la bóveda lo SELLA en el act
   assert.match(permisosDe(id), /firma/, 'el Master se lo devuelve:\n' + miembros())
 })
 
-escenario('quitar «administra» corta la administración EN EL ACTO', async () => {
+scenario('quitar «administra» corta la administración EN EL ACTO', async () => {
   ctl(`caps ${await idDe(admin.pub)} -administra`)
   await sleep(1200)
   // Con el cert TODAVÍA en la mano (no ha caducado): antes seguía administrando hasta un
@@ -577,13 +577,13 @@ escenario('quitar «administra» corta la administración EN EL ACTO', async () 
   }
 })
 
-escenario('y renovar ya no le devuelve el permiso: el cert sigue al acta', async () => {
+scenario('y renovar ya no le devuelve el permiso: el cert sigue al acta', async () => {
   const r = await correrGuion('admin', GUION_RENOVAR, { que: 'la renovación' })
   assert.ok(r.ok, 'debería poder renovar (sigue siendo miembro): ' + r.error)
   assert.ok(!r.valor.scope.includes('vault:admin'), 'pero sin administración: ' + r.valor.scope)
 })
 
-escenario('a un aparato revocado la bóveda le REEMITE el aviso firmado', async () => {
+scenario('a un aparato revocado la bóveda le REEMITE el aviso firmado', async () => {
   // Quitar un aparato mientras está apagado era invisible para él: el aviso firmado se
   // manda una vez y, si no estaba escuchando, no volvía a mandarse nunca. Con un error
   // suelto no puede borrar nada —no va firmado, y borrar con eso sería destruir datos
@@ -606,23 +606,23 @@ escenario('a un aparato revocado la bóveda le REEMITE el aviso firmado', async 
 
 // ---------- arranque ----------
 
-const motor = elegirMotor()
-console.log(`\nSMOKE · consola remota: admitir a distancia, cada aparato en su caja (motor: ${motor})\n`)
+const motor = pickEngine()
+console.log(`\nSMOKE · remote console: admit remotely, each device in its own box (engine: ${motor})\n`)
 if (!fs.existsSync(path.join(ROOT, 'dotrino-vault/dist/dotrino-vaultd'))) {
-  console.error('Falta el binario. Compílalo con:  cd dotrino-vault && bash packaging/build.sh\n')
+  console.error('Missing the binary. Build it with:  cd dotrino-vault && bash packaging/build.sh\n')
   process.exit(2)
 }
 try {
   proxy = await startProxy({ log })
-  console.log(`  proxy local en ${proxy.url}`)
-  console.log(`  ecosistema montado de solo lectura desde ${ECO}\n`)
-  const ok = await correr()
-  destruirCajas()
+  console.log(`  local proxy at ${proxy.url}`)
+  console.log(`  ecosystem mounted read-only from ${ECO}\n`)
+  const ok = await runScenarios()
+  destroyBoxes()
   await teardown()
   process.exit(ok ? 0 : 1)
 } catch (e) {
-  console.error('\nno se pudo montar el escenario:', e?.stack || e)
-  destruirCajas()
+  console.error('\ncould not set up the scenario:', e?.stack || e)
+  destroyBoxes()
   await teardown()
   process.exit(1)
 }

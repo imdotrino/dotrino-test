@@ -18,10 +18,10 @@
  *     directorio basado en presencia no tendría nada que contestar;
  *   · una identidad que no anunció llave da `no-encpub` y NO se manda nada en claro.
  *
- *   node smoke/sellado-desconocidos.mjs [--verbose]
+ *   node smoke/sealed-strangers.mjs [--verbose]
  */
 import assert from 'node:assert/strict'
-import { escenario, correr, startProxy, teardown } from './lib/harness.js'
+import { scenario, runScenarios, startProxy, teardown } from './lib/harness.js'
 
 import { WebSocketProxyClient } from '../../dotrino-proxy-client/src/client.js'
 import { makeEncKeypair, setSealingPrimitives } from '../../dotrino-proxy-client/src/sealing.js'
@@ -81,7 +81,7 @@ async function conectar (id) {
 const conContenido = (c) => c.cable.filter((f) => f.message !== undefined)
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms))
 
-escenario('el proxio dice de entrada que sabe servir llaves de cifrado', async () => {
+scenario('el proxio dice de entrada que sabe servir llaves de cifrado', async () => {
   proxy = await startProxy({ log })
   const ana = await identidad('ana')
   const c = await conectar(ana)
@@ -90,7 +90,7 @@ escenario('el proxio dice de entrada que sabe servir llaves de cifrado', async (
   c.close()
 })
 
-escenario('ana le sella a beto sin haberse emparejado nunca', async () => {
+scenario('ana le sella a beto sin haberse emparejado nunca', async () => {
   const ana = await identidad('ana')
   const beto = await identidad('beto')
   const cAna = await conectar(ana)
@@ -120,7 +120,7 @@ escenario('ana le sella a beto sin haberse emparejado nunca', async () => {
   cAna.close(); cBeto.close()
 })
 
-escenario('también con el destinatario APAGADO: se sella y espera en la cola de 24 h', async () => {
+scenario('también con el destinatario APAGADO: se sella y espera en la cola de 24 h', async () => {
   const ana = await identidad('ana')
   const beto = await identidad('beto')
 
@@ -146,7 +146,7 @@ escenario('también con el destinatario APAGADO: se sella y espera en la cola de
   cAna.close(); cBeto2.close()
 })
 
-escenario('a quien no anunció llave NO se le manda nada, y se dice por qué', async () => {
+scenario('a quien no anunció llave NO se le manda nada, y se dice por qué', async () => {
   const ana = await identidad('ana')
   const fantasma = await identidad('fantasma')   // nunca se conectó
   const cAna = await conectar(ana)
@@ -161,7 +161,7 @@ escenario('a quien no anunció llave NO se le manda nada, y se dice por qué', a
   cAna.close()
 })
 
-escenario('por TOKEN también se sella: la app dice de quién es el token', async () => {
+scenario('por TOKEN también se sella: la app dice de quién es el token', async () => {
   const ana = await identidad('ana')
   const beto = await identidad('beto')
   const cAna = await conectar(ana)
@@ -179,7 +179,7 @@ escenario('por TOKEN también se sella: la app dice de quién es el token', asyn
   cAna.close(); cBeto.close()
 })
 
-escenario('nadie puede anunciar la llave de otro', async () => {
+scenario('nadie puede anunciar la llave de otro', async () => {
   const ana = await identidad('ana')
   const bruto = await identidad('bruto')
   const cBruto = await conectar(bruto)
@@ -197,6 +197,6 @@ escenario('nadie puede anunciar la llave de otro', async () => {
   cBruto.close(); cOtro.close()
 })
 
-const ok = await correr()
+const ok = await runScenarios()
 await teardown()
 process.exit(ok ? 0 : 1)

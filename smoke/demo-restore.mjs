@@ -104,7 +104,8 @@ async function arrancarMaquina (dir) {
   agente = spawn(process.execPath, ['bin/cli.js', '--dir', dir, '--proxy', proxy.url, '--shell', '/bin/sh'], { cwd: AGENTE, stdio: ['ignore', 'pipe', 'pipe'] })
   const anotar = (b) => { lineas.push(String(b)); log('[machine] ' + String(b).trim()) }
   agente.stdout.on('data', anotar); agente.stderr.on('data', anotar)
-  await esperar(() => lineas.join('').includes('agente activo ·'), { que: 'que la máquina arranque' })
+  // Necesita @dotrino/terminal-agent construido con remote-agent ≥ 0.22.2 (el log dice «agent running»).
+  await esperar(() => lineas.join('').includes('agent running ·'), { que: 'que la máquina arranque' })
 }
 
 /** Restaura la copia en directorios nuevos y levanta bóveda (en un contenedor nuevo) y máquina. */

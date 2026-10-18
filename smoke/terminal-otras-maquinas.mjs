@@ -146,7 +146,8 @@ scenario('con la bóveda apagada y sin acta guardada, una máquina nueva DICE qu
   proc.stdout.on('data', (d) => { salida += d })
   proc.stderr.on('data', (d) => { salida += d })
   maquinas.c = { dir, proc }
-  await esperar(() => /agente activo/.test(salida), { que: `que arranque el agente c\n${salida}` })
+  // Necesita @dotrino/terminal-agent construido con remote-agent ≥ 0.22.2 (el log dice «agent running»).
+  await esperar(() => /agent running/.test(salida), { que: `que arranque el agente c\n${salida}` })
   const c = await connectLocal(dir)
   const got = []
   c.on('message', (m) => got.push(m))
@@ -171,7 +172,7 @@ scenario('una máquina enlazada SIN RED abre igual sus consolas locales', async 
   proc.stdout.on('data', (d) => { salida += d })
   proc.stderr.on('data', (d) => { salida += d })
   maquinas.sinred = { dir, proc }
-  await esperar(() => /agente activo/.test(salida), { timeoutMs: 40000, que: `que el agente arranque sin red\n${salida}` })
+  await esperar(() => /agent running/.test(salida), { timeoutMs: 40000, que: `que el agente arranque sin red\n${salida}` })
   assert.match(salida, /local windows work/, 'no dijo que la parte remota no arrancó')
   const c = await connectLocal(dir)
   const got = []

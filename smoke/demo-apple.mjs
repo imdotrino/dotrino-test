@@ -59,7 +59,8 @@ const docker = (...args) => spawnSync('docker', args, { encoding: 'utf8' })
 const logsDe = () => { const r = docker('logs', contenedor); return (r.stdout || '') + (r.stderr || '') }
 
 /** Las veces que la máquina dijo que está activa: cada arranque del contenedor suma una. */
-const arranques = () => (logsDe().match(/agente activo ·/g) || []).length
+// Necesita @dotrino/terminal-agent construido con remote-agent ≥ 0.22.2 (el log dice «agent running»).
+const arranques = () => (logsDe().match(/agent running ·/g) || []).length
 
 /**
  * Abre la PWA, entra en la máquina, escribe `ordenes` y espera a que salga `fin`. Devuelve lo

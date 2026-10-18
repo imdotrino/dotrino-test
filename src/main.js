@@ -70,7 +70,7 @@ function applyI18n () {
 function refreshMode () {
   const modes = ['standalone', 'minimal-ui', 'fullscreen', 'window-controls-overlay']
   const active = modes.find((m) => matchMedia(`(display-mode: ${m})`).matches) || 'browser'
-  const iosStandalone = window.navigator.standalone === true
+  const iosStandalone = /** @type {Navigator & { standalone?: boolean }} */ (window.navigator).standalone === true
   const inPwa = active !== 'browser' || iosStandalone
   document.getElementById('mode').innerHTML =
     `<span class="dot ${inPwa ? 'on' : 'off'}"></span>display-mode: <b>${active}</b>${iosStandalone ? ' (iOS standalone)' : ''}`
@@ -78,6 +78,7 @@ function refreshMode () {
 }
 
 // ---------- intent de Android ----------
+/** @param {{ pkg?: string }} [opts] */
 function intentUrl ({ pkg } = {}) {
   const u = new URL(TARGET)
   const host = u.host + u.pathname + u.search

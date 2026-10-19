@@ -136,7 +136,7 @@ scenario('with the vault off and no stored record, a new machine SAYS it could n
   proc.stdout.on('data', (d) => { output += d })
   proc.stderr.on('data', (d) => { output += d })
   machines.c = { dir, proc }
-  // Necesita @dotrino/terminal-agent construido con remote-agent ≥ 0.22.2 (el log dice «agent running»).
+  // Necesita @dotrino/terminal-agent construido con remote-agent ≥ 0.22.5 (el log dice «agent running»).
   await waitFor(() => /agent running/.test(output), { what: `agent c to start\n${output}` })
   const c = await connectLocal(dir)
   const got = []
@@ -145,7 +145,7 @@ scenario('with the vault off and no stored record, a new machine SAYS it could n
   const r = await waitFor(() => got.find((m) => m.type === 'machines' || m.type === 'fail'), { timeoutMs: 60000, what: 'the answer' })
   c.close()
   assert.equal(r.type, 'fail', 'it answered with a list: ' + JSON.stringify(r))
-  assert.equal(r.code, 'no-acta', JSON.stringify(r))
+  assert.equal(r.code, 'no-record', JSON.stringify(r))
 })
 
 scenario('a linked machine WITHOUT NETWORK still opens its local consoles', async () => {

@@ -8,7 +8,7 @@
  * proxio (`t`)— no lo cubría nadie del lado del navegador.
  *
  * Este escenario cierra ese hueco. Levanta el proxio CON identidad de nodo (como
- * `dotrino-vault/test/pairing-cita.e2e.test.mjs`), pide un emparejamiento y comprueba
+ * `dotrino-vault/test/pairing-rendezvous.e2e.test.mjs`), pide un emparejamiento y comprueba
  * qué hace la consola con la invitación corta:
  *
  *   1 · la ACEPTA (no la descarta como código inválido) y arranca el proceso, y

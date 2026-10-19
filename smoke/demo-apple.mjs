@@ -138,11 +138,11 @@ scenario('«serve» arranca y el revisor entra con la dirección y la contraseñ
 
 scenario('la shell es de «tester» y no puede leer la bóveda, su socket ni la copia', async () => {
   const t = await enLaShell(telefono,
-    'id -un; ls /data/run/vault; ls /run/vault; ls /data/copia; touch ~/sucio /tmp/sucio; echo fin-$((3*3))', 'fin-9')
+    'id -un; ls /data/run/vault; ls /run/vault; ls /data/snapshot; touch ~/sucio /tmp/sucio; echo fin-$((3*3))', 'fin-9')
   assert.match(t, /^tester$/m, 'quien escribe es tester')
   assert.match(t, /\/data\/run\/vault.*Permission denied/, 'el directorio de la bóveda está cerrado')
   assert.match(t, /\/run\/vault.*Permission denied/, 'el del socket también')
-  assert.match(t, /\/data\/copia.*Permission denied/, 'y la copia (lo que sobrevive al reset)')
+  assert.match(t, /\/data\/snapshot.*Permission denied/, 'y la copia (lo que sobrevive al reset)')
 })
 
 scenario('el reset (reiniciar el contenedor) borra lo que dejó y el mismo teléfono sigue entrando', async () => {
@@ -153,7 +153,7 @@ scenario('el reset (reiniciar el contenedor) borra lo que dejó y el mismo telé
   assert.doesNotMatch(t, /sucio/, 'ni ~/sucio ni /tmp/sucio')
 })
 
-scenario('sin volumen (Timone): la copia llega en trozos por DEMO_COPIA_B64_<n>, contesta en el puerto y el revisor entra', async () => {
+scenario('sin volumen (Timone): la copia llega en trozos por DEMO_SNAPSHOT_B64_<n>, contesta en el puerto y el revisor entra', async () => {
   // `export 8000` desde un contenedor con el volumen: una línea por variable, porque Timone
   // limita cada valor a 8192 caracteres.
   const ex = docker('run', '--rm', '-v', `${volumen}:/data`, IMAGEN, 'export', '8000')
@@ -161,7 +161,7 @@ scenario('sin volumen (Timone): la copia llega en trozos por DEMO_COPIA_B64_<n>,
   const partes = ex.stdout.trim().split('\n')
   assert.ok(partes.length > 1, 'sale en varias partes: ' + partes.length)
   for (const p of partes) assert.match(p, /^[A-Za-z0-9+/=]{1,8000}$/, 'cada una en base64 y de 8000 como mucho')
-  const vars = partes.flatMap((p, i) => ['-e', `DEMO_COPIA_B64_${i + 1}=${p}`])
+  const vars = partes.flatMap((p, i) => ['-e', `DEMO_SNAPSHOT_B64_${i + 1}=${p}`])
   docker('rm', '-f', contenedor)
   const puerto = 18000 + Math.floor(Math.random() * 1000)
   contenedor = `smoke-demo-apple-env-${Date.now().toString(36)}`
@@ -169,7 +169,7 @@ scenario('sin volumen (Timone): la copia llega en trozos por DEMO_COPIA_B64_<n>,
     '-e', `DEMO_PROXY=${proxyEnCaja()}`, ...vars, '-e', `DEMO_HTTP_PORT=${puerto}`, IMAGEN)
   assert.equal(r.status, 0, 'docker run sin volumen: ' + r.stderr)
   await esperar(() => arranques() >= 1, { timeoutMs: 30000, que: 'que la máquina arranque' })
-  assert.match(logsDe(), /copy loaded from DEMO_COPIA_B64/, 'cargó la copia de la variable')
+  assert.match(logsDe(), /snapshot loaded from DEMO_SNAPSHOT_B64/, 'cargó la copia de la variable')
   assert.match(logsDe(), new RegExp('serving ' + direccion.replace(/[-@]/g, '\\$&')), 'con la misma dirección')
   const ok = await esperar(() => fetch(`http://127.0.0.1:${puerto}/`).then((x) => x.text()).catch(() => null), { que: 'el 200 del puerto' })
   assert.equal(ok.trim(), 'ok')

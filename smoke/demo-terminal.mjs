@@ -19,99 +19,89 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { scenario, runScenarios, startProxy, startVault, teardown, serveStatic, tmpDir, ROOT } from './lib/harness.js'
 import { serveLoginPage, signIn } from './lib/sign-in.js'
+import { waitFor } from './lib/wait.js'
 
 const VERBOSE = process.argv.includes('--verbose')
 const LOGS = VERBOSE || process.argv.includes('--logs')
 const log = (m) => { if (LOGS) console.log(m) }
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 const IFRAME = path.join(ROOT, 'dotrino-identity/vault')
 const PWA = path.join(ROOT, 'dotrino-terminal/dist')
-const AGENTE = path.join(ROOT, 'dotrino-terminal/agent')
+const AGENT = path.join(ROOT, 'dotrino-terminal/agent')
 
-const USUARIO = 'tester-1'
-const CLAVE = 'contrasena-de-prueba-larga'
+const USER = 'tester-1'
+const PASSWORD = 'contrasena-de-prueba-larga'
 
 let proxy = null
 let vault = null
 let webIframe = null
-let webEntrar = null
+let webSignIn = null
 let webPwa = null
-let navegador = null
-let contexto = null
-let agente = null
-let cuenta = null          // { address, deviceId, caps, pub }
+let browser = null
+let context = null
+let agent = null
+let account = null          // { address, deviceId, caps, pub }
 
 const iframeUrl = () => `${webIframe.url}/?proxy=${encodeURIComponent(proxy.url)}`
 
-async function esperar (fn, { timeoutMs = 20000, que = 'la condición' } = {}) {
-  const t = Date.now() + timeoutMs
-  while (Date.now() < t) {
-    const v = await fn()
-    if (v) return v
-    await sleep(150)
-  }
-  throw new Error('timed out waiting for ' + que)
+const signInData = (password) => ({ pageUrl: webSignIn.url, iframeUrl: iframeUrl(), proxyUrl: proxy.url, address: account.address, password })
+
+async function visibleMachines (page) {
+  return page.locator('[data-testid="machine-item"]').count()
 }
 
-const datosEntrar = (password) => ({ paginaUrl: webEntrar.url, iframeUrl: iframeUrl(), proxyUrl: proxy.url, address: cuenta.address, password })
-
-async function maquinasVisibles (pagina) {
-  return pagina.locator('[data-testid="machine-item"]').count()
-}
-
-scenario('la bóveda da de alta al tester con usuario y contraseña', async () => {
-  cuenta = await vault.loginsAdd(USUARIO, CLAVE, { label: 'tester' })
-  assert.match(cuenta.address, new RegExp(`^${USUARIO}@[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$`), 'la dirección: ' + cuenta.address)
-  assert.ok(cuenta.caps.includes('sign'), 'con `sign`, que es lo que exige la terminal')
+scenario('the vault registers the tester with user and password', async () => {
+  account = await vault.loginsAdd(USER, PASSWORD, { label: 'tester' })
+  assert.match(account.address, new RegExp(`^${USER}@[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$`), 'the address: ' + account.address)
+  assert.ok(account.caps.includes('sign'), 'with `sign`, which is what the terminal requires')
 })
 
-scenario('la máquina de prueba se enrola en la bóveda y arranca', async () => {
-  const { enroll } = await import(path.join(AGENTE, 'link.js'))
-  const { startAgent } = await import(path.join(AGENTE, 'index.js'))
+scenario('the test machine enrolls in the vault and starts', async () => {
+  const { enroll } = await import(path.join(AGENT, 'link.js'))
+  const { startAgent } = await import(path.join(AGENT, 'index.js'))
   const dir = tmpDir('terminal-agent')
   const qr = await vault.pair({ label: 'Máquina de prueba' })
   await enroll({ qr, dir, onChallenge: ({ code }) => { vault.waitPending().then(() => vault.approve(code)) } })
-  agente = await startAgent({ dir, shell: '/bin/sh', quiet: !LOGS })
-  assert.ok(agente.remote, 'con enlace, el agente atiende a los otros aparatos')
+  agent = await startAgent({ dir, shell: '/bin/sh', quiet: !LOGS })
+  assert.ok(agent.remote, 'with a link, the agent serves the other devices')
 })
 
-scenario('sin haber entrado, la terminal pide elegir dónde vive la identidad', async () => {
-  const pagina = await contexto.newPage()
-  await pagina.goto(`${webPwa.url}/consoles?vault=${encodeURIComponent(iframeUrl())}`)
-  await esperar(async () => pagina.locator('#goVault').count(), { timeoutMs: 45000, que: 'la pantalla de elegir bóveda' })
-  assert.equal(await maquinasVisibles(pagina), 0, 'un perfil nuevo no es de esa cuenta')
-  await pagina.close()
+scenario('before signing in, the terminal asks where the identity lives', async () => {
+  const page = await context.newPage()
+  await page.goto(`${webPwa.url}/consoles?vault=${encodeURIComponent(iframeUrl())}`)
+  await waitFor(async () => page.locator('#goVault').count(), { timeoutMs: 45000, what: 'the vault picker screen' })
+  assert.equal(await visibleMachines(page), 0, 'a new profile does not belong to that account')
+  await page.close()
 })
 
-scenario('con la contraseña equivocada no entra, y lo dice por su código', async () => {
-  const r = await signIn(contexto, datosEntrar('no-es-esta-contrasena'))
-  assert.equal(r.ok, false, 'no entra')
-  assert.equal(r.code, 'login-failed', 'y el código es el de la contraseña: ' + JSON.stringify(r))
+scenario('with the wrong password it does not sign in, and says so by its code', async () => {
+  const r = await signIn(context, signInData('no-es-esta-contrasena'))
+  assert.equal(r.ok, false, 'it does not sign in')
+  assert.equal(r.code, 'login-failed', 'and the code is the password one: ' + JSON.stringify(r))
 })
 
-scenario('el tester entra con su dirección y su contraseña', async () => {
-  const r = await signIn(contexto, datosEntrar(CLAVE))
-  assert.ok(r.ok, 'entra: ' + JSON.stringify(r))
+scenario('the tester signs in with their address and password', async () => {
+  const r = await signIn(context, signInData(PASSWORD))
+  assert.ok(r.ok, 'signs in: ' + JSON.stringify(r))
 })
 
-scenario('y la terminal encuentra la máquina y le abre una shell', async () => {
-  const pagina = await contexto.newPage()
-  pagina.on('console', (m) => log('[pwa] ' + m.text()))
-  pagina.on('pageerror', (e) => log('[pwa!] ' + e.message))
-  await pagina.setViewportSize({ width: 900, height: 700 })
-  await pagina.goto(`${webPwa.url}/consoles?vault=${encodeURIComponent(iframeUrl())}`)
-  const maquina = pagina.locator('[data-testid="machine-item"]').first()
-  await maquina.waitFor({ timeout: 45000 })
-  assert.match(await maquina.innerText(), /Máquina de prueba/, 'con el nombre que tiene en el acta')
-  await maquina.click()
-  await esperar(async () => (await agente.consoles.list()).length === 1, { que: 'que abra una consola en la máquina' })
+scenario('and the terminal finds the machine and opens a shell on it', async () => {
+  const page = await context.newPage()
+  page.on('console', (m) => log('[pwa] ' + m.text()))
+  page.on('pageerror', (e) => log('[pwa!] ' + e.message))
+  await page.setViewportSize({ width: 900, height: 700 })
+  await page.goto(`${webPwa.url}/consoles?vault=${encodeURIComponent(iframeUrl())}`)
+  const machine = page.locator('[data-testid="machine-item"]').first()
+  await machine.waitFor({ timeout: 45000 })
+  assert.match(await machine.innerText(), /Máquina de prueba/, 'with the name it has in the record')
+  await machine.click()
+  await waitFor(async () => (await agent.consoles.list()).length === 1, { what: 'a console to open on the machine' })
   // Una orden de verdad: lo que escribe el tester llega a la shell y la respuesta vuelve.
-  await pagina.locator('.xterm-helper-textarea').first().focus()
-  await pagina.keyboard.type('echo hola-$((40+2))\n')
-  await esperar(async () => (await pagina.locator('.xterm-rows').first().innerText()).includes('hola-42'), { que: 'la respuesta de la shell' })
-  if (process.env.SMOKE_SHOT) await pagina.screenshot({ path: process.env.SMOKE_SHOT })
-  await pagina.close()
+  await page.locator('.xterm-helper-textarea').first().focus()
+  await page.keyboard.type('echo hola-$((40+2))\n')
+  await waitFor(async () => (await page.locator('.xterm-rows').first().innerText()).includes('hola-42'), { what: 'the shell answer' })
+  if (process.env.SMOKE_SHOT) await page.screenshot({ path: process.env.SMOKE_SHOT })
+  await page.close()
 })
 
 console.log('\nSMOKE · the terminal test account (user and password), all local\n')
@@ -119,23 +109,23 @@ if (!fs.existsSync(path.join(PWA, 'index.html'))) { console.error('Missing a bui
 try {
   const { chromium } = await import('playwright')
   proxy = await startProxy({ log })
-  vault = await startVault({ proxyUrl: proxy.url, name: 'boveda', log })
+  vault = await startVault({ proxyUrl: proxy.url, name: 'vault', log })
   webIframe = await serveStatic(IFRAME)
-  webEntrar = await serveLoginPage()
+  webSignIn = await serveLoginPage()
   webPwa = await serveStatic(PWA, { spa: true })
   console.log(`  proxy  ${proxy.url}`)
   console.log(`  pwa    ${webPwa.url}/consoles\n`)
-  navegador = await chromium.launch({ headless: !VERBOSE })
-  contexto = await navegador.newContext({ locale: 'es-ES' })
+  browser = await chromium.launch({ headless: !VERBOSE })
+  context = await browser.newContext({ locale: 'es-ES' })
   const ok = await runScenarios()
-  try { agente?.close() } catch (_) {}
-  await contexto?.close(); await navegador?.close()
+  try { agent?.close() } catch (_) {}
+  await context?.close(); await browser?.close()
   await teardown()
   process.exit(ok ? 0 : 1)
 } catch (e) {
   console.error('\ncould not set up the scenario:', e?.stack || e)
-  try { agente?.close() } catch (_) {}
-  try { await contexto?.close(); await navegador?.close() } catch (_) {}
+  try { agent?.close() } catch (_) {}
+  try { await context?.close(); await browser?.close() } catch (_) {}
   await teardown()
   process.exit(1)
 }

@@ -32,7 +32,7 @@ let proxy = null
 let vault = null
 
 /** Un dispositivo/agente headless que se enrola como lo haría el de verdad. */
-async function dispositivo (vault, { label, onCode } = {}) {
+async function device (vault, { label, onCode } = {}) {
   const qr = await vault.pair({ label })
   let code = null
   const p = enroll({
@@ -45,7 +45,7 @@ async function dispositivo (vault, { label, onCode } = {}) {
   // esperar a que el propio dispositivo genere su código (lo muestra en su pantalla)
   const t = Date.now() + 5000
   while (!code && Date.now() < t) await new Promise((r) => setTimeout(r, 50))
-  assert.ok(code, 'el dispositivo tiene que mostrar un código de 6 dígitos')
+  assert.ok(code, 'the device must show a 6-digit code')
   return { qr, deviceId, code, enrolled: p }
 }
 
@@ -61,86 +61,86 @@ async function dispositivo (vault, { label, onCode } = {}) {
  * Que la llave esté aquí es lo que permite que la bóveda siga sirviendo con el perfil
  * CERRADO; que solo tenga `sign` es lo que impide que eso sirva para leer nada.
  */
-scenario('la bóveda arranca con su acta: el dueño y su propia llave de comunicación', async () => {
-  assert.ok(vault.iss, 'la bóveda publica su identidad en state.json')
+scenario('the vault starts with its record: the owner and its own communication key', async () => {
+  assert.ok(vault.iss, 'the vault publishes its identity in state.json')
   const acta = vault.acta()
-  assert.ok(acta, 'la bóveda nace con su acta')
+  assert.ok(acta, 'the vault is born with its record')
   // «Manda ella misma» = la selló su propia llave de perfil. El campo `sealer` que se
   // comparaba aquí no existe: se llama `profileId`, y llevaba tiempo dando `undefined`
   // detrás de otra aserción que fallaba antes.
-  assert.equal(acta.profileId, acta.sealedBy, 'nace mandando ella misma')
+  assert.equal(acta.profileId, acta.sealedBy, 'it is born governing itself')
   assert.equal(acta.sealerChanged, false)
 
-  const dueno = acta.members.find((m) => !m.cn)
+  const owner = acta.members.find((m) => !m.cn)
   const comm = acta.members.find((m) => m.cn === 'vault')
-  assert.equal(acta.members.length, 2, 'el dueño y la llave de comunicación, nadie más')
-  assert.deepEqual([...dueno.caps].sort(), ['read', 'sealer', 'sign', 'store'])
-  assert.deepEqual(comm.caps, ['sign'], 'la llave de comunicación habla; no lee ni guarda')
+  assert.equal(acta.members.length, 2, 'the owner and the communication key, nobody else')
+  assert.deepEqual([...owner.caps].sort(), ['read', 'sealer', 'sign', 'store'])
+  assert.deepEqual(comm.caps, ['sign'], 'the communication key talks; it neither reads nor stores')
 })
 
-scenario('emparejar: con el código correcto se emite el cert y el dispositivo entra en el acta', async () => {
-  const d = await dispositivo(vault, { label: 'celular' })
+scenario('pairing: with the right code the cert is issued and the device joins the record', async () => {
+  const d = await device(vault, { label: 'celular' })
   vault.approve(d.code)
   const res = await d.enrolled
-  assert.ok(res.cert, 'el dispositivo recibe su certificado')
-  assert.equal(res.cert.iss, vault.iss, 'firmado por la bóveda que vio en el código')
-  assert.equal(res.cert.sub, res.device.publickey, 'y emitido para ESTE dispositivo')
+  assert.ok(res.cert, 'the device receives its certificate')
+  assert.equal(res.cert.iss, vault.iss, 'signed by the vault it saw in the code')
+  assert.equal(res.cert.sub, res.device.publickey, 'and issued for THIS device')
 
   const dump = await vault.devices()
-  assert.ok((dump.issued || []).some((x) => x.sub === res.device.publickey), 'queda registrado')
+  assert.ok((dump.issued || []).some((x) => x.sub === res.device.publickey), 'it is recorded')
 
   const acta = vault.acta()
   // Tres: el dueño, la llave de comunicación de la bóveda y el celular que acaba de entrar.
-  assert.equal(acta.members.length, 3, 'aprobar es también admitir en el perfil')
+  assert.equal(acta.members.length, 3, 'approving also admits into the profile')
   assert.ok(acta.members.some((m) => m.pub === res.device.publickey))
 })
 
-scenario('CÓDIGO EQUIVOCADO: no se emite ningún certificado, y luego el correcto sí funciona', async () => {
-  const antes = vault.acta().members.length
-  const d = await dispositivo(vault, { label: 'intruso' })
+scenario('WRONG CODE: no certificate is issued, and then the right one works', async () => {
+  const before = vault.acta().members.length
+  const d = await device(vault, { label: 'intruso' })
 
-  const malo = String((Number(d.code) + 7) % 1000000).padStart(6, '0')
-  vault.approve(malo)
+  const wrongCode = String((Number(d.code) + 7) % 1000000).padStart(6, '0')
+  vault.approve(wrongCode)
   await new Promise((r) => setTimeout(r, 1200))
 
-  assert.equal(vault.acta().members.length, antes, 'nadie entró en el perfil')
+  assert.equal(vault.acta().members.length, before, 'nobody joined the profile')
   const dump = await vault.devices()
-  const nuevos = (dump.issued || []).filter((x) => x.label === 'intruso')
-  assert.equal(nuevos.length, 0, 'la maestra no firmó ningún certificado')
+  const issuedNow = (dump.issued || []).filter((x) => x.label === 'intruso')
+  assert.equal(issuedNow.length, 0, 'the master key signed no certificate')
 
   // El dispositivo sigue esperando: con el código bueno, entra.
   vault.approve(d.code)
   const res = await d.enrolled
   assert.ok(res.cert)
-  assert.equal(vault.acta().members.length, antes + 1)
+  assert.equal(vault.acta().members.length, before + 1)
 })
 
-scenario('agentes headless (terminal, ia, bot) se enrolan con el mismo protocolo', async () => {
-  for (const nombre of ['terminal', 'ia', 'bot']) {
-    const d = await dispositivo(vault, { label: nombre })
+scenario('headless agents (terminal, ia, bot) enroll with the same protocol', async () => {
+  for (const name of ['terminal', 'ia', 'bot']) {
+    const d = await device(vault, { label: name })
     vault.approve(d.code)
     const res = await d.enrolled
-    assert.ok(res.cert, `${nombre} recibe su certificado`)
+    assert.ok(res.cert, `${name} receives its certificate`)
     const acta = vault.acta()
-    assert.ok(acta.members.some((m) => m.label === nombre), `${nombre} está en el acta`)
+    assert.ok(acta.members.some((m) => m.label === name), `${name} is in the record`)
   }
 })
 
-scenario('revocar corta el acceso de verdad', async () => {
-  const d = await dispositivo(vault, { label: 'perdido' })
+scenario('revoking really cuts access', async () => {
+  const d = await device(vault, { label: 'perdido' })
   vault.approve(d.code)
   const res = await d.enrolled
 
   // Antes de revocar, la bóveda le firma lo que le pida.
-  const firma = await requestSign({
+  const signed = await requestSign({
     masterPubkey: vault.iss, proxyUrl: proxy.url, device: res.device, cert: res.cert,
     payload: { hola: 'mundo' }, dir: tmpDir('sign-ok')
   })
-  assert.ok(firma.signature, 'con el cert vigente, la bóveda firma')
+  assert.ok(signed.signature, 'with a valid cert, the vault signs')
 
   const dump = await vault.devices()
-  const dele = (dump.issued || []).find((x) => x.sub === res.device.publickey)
-  vault.revoke(dele.nonce)
+  const delegation = (dump.issued || []).find((x) => x.sub === res.device.publickey)
+  vault.revoke(delegation.nonce)
   await new Promise((r) => setTimeout(r, 1200))
 
   await assert.rejects(
@@ -149,56 +149,56 @@ scenario('revocar corta el acceso de verdad', async () => {
       payload: { hola: 'otra vez' }, dir: tmpDir('sign-ko')
     }),
     /unauthorized|no autorizado/,
-    'revocado = la bóveda deja de firmarle'
+    'revoked = the vault stops signing for it'
   )
 })
 
-scenario('una cuenta que ya existe NO se la lleva la bóveda: se crea una cuenta más', async () => {
+scenario('an existing account is NOT taken over by the vault: one more account is created', async () => {
   // Camino B de `dotrino-vault/docs/vinculacion-de-cuentas.md`. Hasta 2026-07-27 esto
   // sobrescribía la cuenta del aparato sin preguntar —la fusión de cuentas que el modelo
   // prohíbe—; ahora la de aquí queda intacta y la de la bóveda entra como una cuenta MÁS.
   const dir = tmpDir('identidad-previa')
-  const yo = await Identity.connect({ dir })
-  const antes = await yo.myMembership()
-  assert.equal(antes.isMaster, true, 'antes de emparejar, mandaba en su propia cuenta')
+  const me = await Identity.connect({ dir })
+  const before = await me.myMembership()
+  assert.equal(before.isMaster, true, 'before pairing, it governed its own account')
 
   // Sin decir de qué cuenta se habla, no se toca nada.
-  const qrMalo = await vault.pair({ label: 'sin-elegir' })
-  await assert.rejects(() => yo.enrollDevice(qrMalo), /already using an account|ya está usando una cuenta/,
-    'no se lleva por delante la cuenta abierta')
-  assert.equal((await yo.myMembership()).profileId, antes.profileId, 'sigue siendo la suya')
+  const qrNoChoice = await vault.pair({ label: 'sin-elegir' })
+  await assert.rejects(() => me.enrollDevice(qrNoChoice), /already using an account|ya está usando una cuenta/,
+    'it does not overwrite the open account')
+  assert.equal((await me.myMembership()).profileId, before.profileId, 'it is still its own')
 
   const qr = await vault.pair({ label: 'navegador' })
   let code = null
-  const off = yo.onVault((e) => { if (e.phase === 'challenge') code = e.code })
-  const p = yo.enrollDevice(qr, { join: 'new' })
+  const off = me.onVault((e) => { if (e.phase === 'challenge') code = e.code })
+  const p = me.enrollDevice(qr, { join: 'new' })
   await vault.waitPending()
   const t = Date.now() + 5000
   while (!code && Date.now() < t) await new Promise((r) => setTimeout(r, 50))
-  assert.ok(code, 'muestra su código')
+  assert.ok(code, 'it shows its code')
   vault.approve(code)
   const res = await p
   off()
 
   assert.equal(res.ok, true)
   assert.equal(res.join.joined, true)
-  const ahora = await yo.myMembership()
-  assert.equal(ahora.profileId, vault.acta().profileId, 'la cuenta activa es la de la bóveda')
-  assert.equal(ahora.isMaster, false, 'y ahí no manda: manda la bóveda')
-  assert.notEqual(ahora.pubkey ?? ahora.profileId, antes.profileId, 'entró con una llave NUEVA')
+  const now = await me.myMembership()
+  assert.equal(now.profileId, vault.acta().profileId, "the active account is the vault's")
+  assert.equal(now.isMaster, false, 'and it does not govern there: the vault does')
+  assert.notEqual(now.pubkey ?? now.profileId, before.profileId, 'it joined with a NEW key')
 
   // Y la cuenta de siempre sigue existiendo, entera, en este mismo aparato.
-  const perfiles = await yo.listProfiles()
-  assert.equal(perfiles.length, 2, 'quedan las dos cuentas')
-  const vieja = perfiles.find((x) => !x.current)
-  await yo.switchProfile(vieja.id)
-  yo.destroy()
+  const profiles = await me.listProfiles()
+  assert.equal(profiles.length, 2, 'both accounts remain')
+  const oldProfile = profiles.find((x) => !x.current)
+  await me.switchProfile(oldProfile.id)
+  me.destroy()
   const dev = await Identity.connect({ dir })
-  assert.equal((await dev.myMembership()).profileId, antes.profileId, 'intacta, con su propio acta')
+  assert.equal((await dev.myMembership()).profileId, before.profileId, 'intact, with its own record')
   dev.destroy()
 })
 
-scenario('SIN papel y apagado cuando lo echaron: pregunta al arrancar y la bóveda lo borra', async () => {
+scenario('WITHOUT a certificate and off when removed: it asks on startup and the vault erases it', async () => {
   // EL CASO QUE SE ESCAPABA. El aviso de expulsión se emite al quitar el aparato y viaja por
   // la cola del proxy, que dura 24 h: si estaba apagado, no llega nunca. Y sin certificado
   // —revocado, vencido o perdido— el aparato no puede firmar, ni leer, ni renovar, así que
@@ -206,22 +206,22 @@ scenario('SIN papel y apagado cuando lo echaron: pregunta al arrancar y la bóve
   // ya lo habían echado. Ahora, al arrancar, pregunta con su propia llave (que es lo que el
   // acta nombra) y la bóveda le contesta con el aviso FIRMADO.
   const dir = tmpDir('sin-papel')
-  const yo = await Identity.connect({ dir })
-  await yo.createProfile('Bóveda', { forVault: true })
+  const me = await Identity.connect({ dir })
+  await me.createProfile('Bóveda', { forVault: true })
 
   const qr = await vault.pair({ label: 'olvidado' })
   let code = null
-  const off = yo.onVault((e) => { if (e.phase === 'challenge') code = e.code })
-  const p = yo.enrollDevice(qr)
+  const off = me.onVault((e) => { if (e.phase === 'challenge') code = e.code })
+  const p = me.enrollDevice(qr)
   await vault.waitPending()
   const t = Date.now() + 8000
   while (!code && Date.now() < t) await new Promise((r) => setTimeout(r, 50))
   vault.approve(code)
   await p
   off()
-  const mio = yo.me.publickey
-  assert.ok(vault.acta().members.some((m) => m.pub === mio), 'entró en el acta')
-  yo.destroy()
+  const mine = me.me.publickey
+  assert.ok(vault.acta().members.some((m) => m.pub === mine), 'it joined the record')
+  me.destroy()
 
   // Se le quita el papel a mano: ese es el aparato que perdió su certificado.
   const f = path.join(dir, 'identity.json')
@@ -230,26 +230,26 @@ scenario('SIN papel y apagado cuando lo echaron: pregunta al arrancar y la bóve
   fs.writeFileSync(f, JSON.stringify(kv))
 
   // Y se le echa mientras está apagado: el aviso se emite contra nadie y caduca.
-  vault.removeDevice(mio)
+  vault.removeDevice(mine)
   await new Promise((r) => setTimeout(r, 1500))
-  assert.ok(!vault.acta().members.some((m) => m.pub === mio), 'la bóveda ya no lo tiene')
+  assert.ok(!vault.acta().members.some((m) => m.pub === mine), 'the vault no longer has it')
 
   // Enciende. Al arrancar pregunta, y la respuesta le borra la cuenta de la bóveda.
-  const otra = await Identity.connect({ dir })
-  const hasta = Date.now() + 20000
-  let fuera = false
-  while (Date.now() < hasta && !fuera) {
-    const acta = await otra.profileActa().catch(() => null)
-    fuera = !acta?.acta || acta.acta.profileId !== vault.acta().profileId
-    if (!fuera) await new Promise((r) => setTimeout(r, 300))
+  const restarted = await Identity.connect({ dir })
+  const until = Date.now() + 20000
+  let gone = false
+  while (Date.now() < until && !gone) {
+    const acta = await restarted.profileActa().catch(() => null)
+    gone = !acta?.acta || acta.acta.profileId !== vault.acta().profileId
+    if (!gone) await new Promise((r) => setTimeout(r, 300))
   }
-  otra.destroy()
-  assert.ok(fuera, 'la cuenta de la que lo echaron se fue de este aparato, sin que nadie pulsara nada')
+  restarted.destroy()
+  assert.ok(gone, 'the account it was removed from left this device, with nobody pressing anything')
 })
 
-scenario('el proxy verifica el acta y bindea el perfil (y rechaza una manipulada)', async () => {
+scenario('the proxy verifies the record and binds the profile (and rejects a tampered one)', async () => {
   // Un dispositivo enrolado se identifica presentando su cert y su acta.
-  const d = await dispositivo(vault, { label: 'con-acta' })
+  const d = await device(vault, { label: 'con-acta' })
   vault.approve(d.code)
   const res = await d.enrolled
 
@@ -257,33 +257,33 @@ scenario('el proxy verifica el acta y bindea el perfil (y rechaza una manipulada
   const { signWithDevice } = await import(path.join(ROOT, 'dotrino-identity/vault/capabilities.js'))
   const acta = vault.acta()
 
-  const conectar = async (actaAEnviar) => {
+  const connect = async (actaToSend) => {
     const c = new WebSocketProxyClient({ url: proxy.url, enableWebRTC: false, autoReconnect: false })
     await c.connect()
     const data = { op: 'identify', publickey: res.device.publickey, token: c.token, ts: Date.now() }
     const { signature } = await signWithDevice({ privateJwk: res.device.privateJwk, data })
-    const out = await c.identify({ data, signature, cert: res.cert, acta: actaAEnviar })
+    const out = await c.identify({ data, signature, cert: res.cert, acta: actaToSend })
     c.close()
     return out
   }
 
-  const ok = await conectar(acta)
-  assert.equal(ok.profile, acta.profileId, 'el proxy reconoce a la persona detrás del dispositivo')
+  const ok = await connect(acta)
+  assert.equal(ok.profile, acta.profileId, 'the proxy recognizes the person behind the device')
 
   // Manipulada: darse a sí mismo un miembro extra rompe la firma → el proxy no la acepta.
-  const trucada = { ...acta, members: [...acta.members, { pub: 'pub-inventada', caps: ['sign'] }] }
-  const malo = await conectar(trucada)
-  assert.equal(malo.profile, null, 'un acta manipulada no bindea nada')
-  assert.equal(malo.publickey, res.device.publickey, 'pero el identify normal sigue funcionando')
+  const tampered = { ...acta, members: [...acta.members, { pub: 'pub-inventada', caps: ['sign'] }] }
+  const rejected = await connect(tampered)
+  assert.equal(rejected.profile, null, 'a tampered record binds nothing')
+  assert.equal(rejected.publickey, res.device.publickey, 'but the normal identify still works')
 })
 
-scenario('el contenido viaja CIFRADO: el proxy no ve lo que guardas', async () => {
+scenario('content travels ENCRYPTED: the proxy does not see what you store', async () => {
   const dir = tmpDir('con-contenido')
-  const yo = await Identity.connect({ dir })
+  const me = await Identity.connect({ dir })
   const qr = await vault.pair({ label: 'con-contenido' })
   let code = null
-  const off = yo.onVault((e) => { if (e.phase === 'challenge') code = e.code })
-  const p = yo.enrollDevice(qr, { join: 'new' })
+  const off = me.onVault((e) => { if (e.phase === 'challenge') code = e.code })
+  const p = me.enrollDevice(qr, { join: 'new' })
   await vault.waitPending()
   const t = Date.now() + 5000
   while (!code && Date.now() < t) await new Promise((r) => setTimeout(r, 50))
@@ -292,51 +292,51 @@ scenario('el contenido viaja CIFRADO: el proxy no ve lo que guardas', async () =
   off()
 
   // Al entrar en el perfil se le envuelve la clave de contenido.
-  const mia = await yo.contentKey()
-  assert.ok(mia?.cek, 'el miembro nuevo recibe la clave de contenido del perfil')
+  const key = await me.contentKey()
+  assert.ok(key?.cek, "the new member receives the profile's content key")
 
   // Guardar y leer a través de la bóveda, cifrado de punta a punta.
-  const secreto = 'esto no lo puede ver el proxy ' + Date.now()
-  await yo.vaultStore('appendMessage', { threadKey: 'smoke', entry: { id: 'm1', text: secreto } })
-  const hilo = await yo.vaultStore('listThread', { threadKey: 'smoke' })
-  const textos = JSON.stringify(hilo)
-  assert.ok(textos.includes(secreto), 'el dispositivo lee de vuelta lo que guardó')
+  const secret = 'esto no lo puede ver el proxy ' + Date.now()
+  await me.vaultStore('appendMessage', { threadKey: 'smoke', entry: { id: 'm1', text: secret } })
+  const thread = await me.vaultStore('listThread', { threadKey: 'smoke' })
+  const texts = JSON.stringify(thread)
+  assert.ok(texts.includes(secret), 'the device reads back what it stored')
 
   // Y en el disco de la bóveda tampoco se ve: el archivo va CIFRADO en reposo con una
   // clave ligada a ESA máquina, así que llevarse el archivo no es llevarse el contenido.
   // (Antes esto guardaba en claro y el smoke lo daba por bueno.)
-  const perfilDir = path.join(vault.dir, 'p', fs.readdirSync(path.join(vault.dir, 'p'))[0])
+  const profileDir = path.join(vault.dir, 'p', fs.readdirSync(path.join(vault.dir, 'p'))[0])
   for (const f of ['threads.json', 'vault.json', 'secrets.json', 'identity.json']) {
-    const ruta = path.join(perfilDir, f)
-    if (!fs.existsSync(ruta)) continue
-    const guardado = fs.readFileSync(ruta, 'utf8')
-    assert.ok(guardado.startsWith('DOTRINO-ATREST-v1.'), f + ' tiene que estar cifrado en reposo')
-    assert.ok(!guardado.includes(secreto), f + ' no puede dejar el contenido a la vista')
+    const filePath = path.join(profileDir, f)
+    if (!fs.existsSync(filePath)) continue
+    const stored = fs.readFileSync(filePath, 'utf8')
+    assert.ok(stored.startsWith('DOTRINO-ATREST-v1.'), f + ' must be encrypted at rest')
+    assert.ok(!stored.includes(secret), f + ' must not leave the content in plain sight')
   }
 
   // Pero la bóveda sí lo lee: releerlo por el mismo camino devuelve lo guardado.
-  const relectura = await yo.vaultStore('listThread', { threadKey: 'smoke' })
-  assert.ok(JSON.stringify(relectura).includes(secreto), 'cifrado sí, ilegible para su dueño no')
+  const reread = await me.vaultStore('listThread', { threadKey: 'smoke' })
+  assert.ok(JSON.stringify(reread).includes(secret), 'encrypted yes, unreadable to its owner no')
 })
 
-scenario('la CLI muestra el acta y cambia permisos (`members` / `caps`)', async () => {
-  const d = await dispositivo(vault, { label: 'con-permisos' })
+scenario('the CLI shows the record and changes permissions (`members` / `caps`)', async () => {
+  const d = await device(vault, { label: 'con-permisos' })
   vault.approve(d.code)
   const res = await d.enrolled
 
   const acta = await vault.members()
-  assert.ok(acta.members.length >= 2, 'la CLI ve a todos los miembros')
-  const mio = acta.members.find((m) => m.pub === res.device.publickey)
-  assert.ok(mio.id.match(/^[0-9A-F]{4}-[0-9A-F]{4}$/), 'con un identificador legible')
-  assert.ok(mio.caps.length, 'y sus permisos')
+  assert.ok(acta.members.length >= 2, 'the CLI sees all members')
+  const mine = acta.members.find((m) => m.pub === res.device.publickey)
+  assert.ok(mine.id.match(/^[0-9A-F]{4}-[0-9A-F]{4}$/), 'with a readable identifier')
+  assert.ok(mine.caps.length, 'and its permissions')
 
   await vault.caps(res.device.publickey, ['read'])
-  const despues = await vault.members()
-  assert.deepEqual(despues.members.find((m) => m.pub === res.device.publickey).caps, ['read'],
-    'quitarle permisos desde la bóveda se refleja en el acta')
+  const after = await vault.members()
+  assert.deepEqual(after.members.find((m) => m.pub === res.device.publickey).caps, ['read'],
+    'removing permissions from the vault shows in the record')
 })
 
-scenario('CN: un servicio solo ve SU cajón de secretos, nada más', async () => {
+scenario('CN: a service only sees ITS secrets drawer, nothing else', async () => {
   const { enrollService, waitForSecrets, fetchSecrets } = await import(path.join(ROOT, 'dotrino-vault/lib/src/service.js'))
 
   // La bóveda guarda un secreto para `proxy` y otro para `geo`.
@@ -362,20 +362,20 @@ scenario('CN: un servicio solo ve SU cajón de secretos, nada más', async () =>
   // En el acta entra como SERVICIO con su CN, no como un dispositivo del usuario.
   const acta = await vault.members()
   const svc = acta.members.find((m) => m.cn === 'proxy')
-  assert.ok(svc, 'el servicio queda en el acta con su nombre')
+  assert.ok(svc, 'the service is in the record with its name')
   assert.equal(svc.isService, true)
-  assert.deepEqual(svc.caps, [], 'sin ningún permiso: su cajón lo abre el nombre')
+  assert.deepEqual(svc.caps, [], 'without any permission: its name opens its drawer')
 
   // Lee lo suyo…
-  const secretos = await waitForSecrets({ dir, ns: 'proxy' })
-  assert.equal((secretos.secrets || secretos).TURN_KEY, 'solo-del-proxy', 'el servicio lee lo suyo')
+  const secrets = await waitForSecrets({ dir, ns: 'proxy' })
+  assert.equal((secrets.secrets || secrets).TURN_KEY, 'solo-del-proxy', 'the service reads its own')
 
   // …y pedir el cajón de otro no cuela.
   await assert.rejects(() => fetchSecrets({ dir, ns: 'geo' }), /unauthorized|no autorizado/,
-    'el cajón de otro servicio no se abre, ni con un cert válido')
+    "another service's drawer does not open, not even with a valid cert")
 })
 
-scenario('mensajería a la PERSONA: los dos dispositivos de un contacto abren el mismo mensaje', async () => {
+scenario("messaging the PERSON: both of a contact's devices open the same message", async () => {
   // Bob tiene dos dispositivos en su perfil; Alice es otra persona.
   const bob = await Identity.connect({ dir: tmpDir('bob') })
   const bob2 = await Identity.connect({ dir: tmpDir('bob2') })
@@ -391,23 +391,23 @@ scenario('mensajería a la PERSONA: los dos dispositivos de un contacto abren el
   // Lo que viaja entre pares es la TARJETA, no el acta: sin etiquetas ni permisos.
   const card = await bob.profileCard()
   assert.equal(card.keys.length, 2)
-  assert.equal(JSON.stringify(card).includes('Celular de Bob'), false, 'no le cuenta a Alice cómo llama a sus aparatos')
+  assert.equal(JSON.stringify(card).includes('Celular de Bob'), false, 'it does not tell Alice what it calls its devices')
 
   const r = await alice.adoptPeerCard(card)
   assert.equal(r.adopted, true)
   assert.equal(r.devices, 2)
 
-  const sobre = await alice.encrypt([{ publickey: bob.me.publickey }], 'hola Bob')
-  assert.equal(Object.keys(sobre.wrap).length, 2, 'una envoltura por dispositivo')
+  const envelope = await alice.encrypt([{ publickey: bob.me.publickey }], 'hola Bob')
+  assert.equal(Object.keys(envelope.wrap).length, 2, 'one wrap per device')
 
   const aliceEnc = await alice.getEncryptionPubkey()
-  for (const [quien, dev] of [['el PC', bob], ['el celular', bob2]]) {
-    const { plaintext } = await dev.decrypt(aliceEnc, null, sobre)
-    assert.equal(plaintext, 'hola Bob', quien + ' de Bob lo abre')
+  for (const [who, dev] of [['PC', bob], ['phone', bob2]]) {
+    const { plaintext } = await dev.decrypt(aliceEnc, null, envelope)
+    assert.equal(plaintext, 'hola Bob', "Bob's " + who + ' opens it')
   }
 
-  const ajeno = await Identity.connect({ dir: tmpDir('ajeno') })
-  await assert.rejects(() => ajeno.decrypt(aliceEnc, null, sobre), /not among the message recipients|no está entre los destinatarios/)
+  const stranger = await Identity.connect({ dir: tmpDir('ajeno') })
+  await assert.rejects(() => stranger.decrypt(aliceEnc, null, envelope), /not among the message recipients|no está entre los destinatarios/)
 })
 
 // ----- arranque -----
@@ -416,7 +416,7 @@ console.log('\nSMOKE · Dotrino ecosystem (proxy + vault + devices, all local)\n
 try {
   proxy = await startProxy({ log })
   console.log(`  local proxy at ${proxy.url}`)
-  vault = await startVault({ proxyUrl: proxy.url, name: 'boveda', log })
+  vault = await startVault({ proxyUrl: proxy.url, name: 'vault', log })
   console.log(`  vault with identity ${vault.state.fingerprint}\n`)
   const ok = await runScenarios()
   await teardown()

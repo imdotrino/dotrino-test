@@ -54,9 +54,9 @@ const messages = {
 // «dotrino.lang» y pone document.documentElement.lang. Aquí solo se lee y se
 // escucha su evento para traducir la copy de la página.
 let lang = (() => {
-  let guardado
-  try { guardado = localStorage.getItem('dotrino.lang') } catch (_) {}
-  if (guardado === 'es' || guardado === 'en') return guardado
+  let saved
+  try { saved = localStorage.getItem('dotrino.lang') } catch (_) {}
+  if (saved === 'es' || saved === 'en') return saved
   return (navigator.language || 'es').toLowerCase().startsWith('en') ? 'en' : 'es'
 })()
 const t = (k) => (messages[lang] || messages.es)[k] ?? k

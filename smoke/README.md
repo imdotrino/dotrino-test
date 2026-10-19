@@ -10,10 +10,10 @@ Las suites:
 ```sh
 npm run smoke                  # protocolo completo, todo en un proceso (rápido)
 npm run smoke:tui              # la TUI de la bóveda: emparejar y administrar a teclazos
-npm run smoke:dispositivos     # cada dispositivo en su propia máquina efímera
-npm run smoke:configuracion    # la CONFIGURACIÓN proxio ↔ bóveda, cada uno en su caja
-npm run smoke:consola          # la CONSOLA REMOTA: admitir a distancia, sin tocar el PC
-npm run smoke:navegador        # el navegador de verdad (Playwright)
+npm run smoke:devices     # cada dispositivo en su propia máquina efímera
+npm run smoke:settings    # la CONFIGURACIÓN proxio ↔ bóveda, cada uno en su caja
+npm run smoke:console          # la CONSOLA REMOTA: admitir a distancia, sin tocar el PC
+npm run smoke:browser        # el navegador de verdad (Playwright)
 node smoke/run.mjs --verbose   # con los logs del proxy y de la bóveda
 ```
 
@@ -41,7 +41,7 @@ smoke se entera en vez de seguir probando una copia vieja.
 5. Revocar corta el acceso: la bóveda deja de firmarle.
 6. Una identidad que ya existía se une al perfil y trae su **certificado de continuidad**.
 
-## `smoke:dispositivos` — cada dispositivo en su propia máquina
+## `smoke:devices` — cada dispositivo en su propia máquina
 
 Un dispositivo de verdad es una **máquina aparte**. Esta suite lo prueba como tal: cada uno
 arranca en su propia caja efímera (un contenedor), genera SU llave en SU disco, no ve el
@@ -113,7 +113,7 @@ en la lista, y por eso «quitar el último» se llevaba por delante a otro), y q
 **código equivocado** la pantalla decía *«Dispositivo aprobado»*, se olvidaba del pendiente
 y dejaba al aparato esperando sin forma de reintentar.
 
-## `smoke:configuracion` — de dónde saca su configuración un agente
+## `smoke:settings` — de dónde saca su configuración un agente
 
 Un agente enrolado saca su configuración del vault, y **el vault manda**: sus valores
 pisan los del `.env` de la máquina. Eso es lo que hace barata la rotación —se cambia en
@@ -154,7 +154,7 @@ lista de "variables que sólo se leen al arrancar" del proxio, escrita a mano, y
 había quedado corta; ahora se enumera al revés (qué SÍ se re-aplica), que falla del lado
 seguro.
 
-## `smoke:consola` — administrar el perfil desde otro aparato
+## `smoke:console` — administrar el perfil desde otro aparato
 
 La consola remota (`dotrino-vault/docs/consola-remota.md`): un dispositivo con la
 capacidad **«administra»** admite y expulsa miembros **sin que el dueño vaya al PC**. Eso
@@ -184,7 +184,7 @@ el scope del cert copiado del cert viejo al renovar (un permiso concedido no lle
 y uno retirado seguía valiendo hasta 30 días) y las operaciones de admin sin cruzar con el
 acta. Detalle en `dotrino-vault/docs/consola-remota.md §11`.
 
-## `smoke:navegador` — el navegador de verdad (Playwright)
+## `smoke:browser` — el navegador de verdad (Playwright)
 
 Lo que no se puede probar sin navegador: el **iframe de identidad en otro origen** (con su
 IndexedDB y sus llaves **no extraíbles**, que solo existen en un navegador), el `postMessage`
@@ -264,7 +264,7 @@ de la release y `@dotrino/terminal-agent` de npm), que es lo que tiene quien se 
   la marca de la app y contestar PowerShell desde la otra máquina, y deja una captura (`--out`).
   Se llama a `dotrino-terminal.cmd`: la política de ejecución de PowerShell bloquea el `.ps1` de npm.
 
-- **`npm run smoke:terminal-windows-sesion -- --desktop <zip>`** — lo que una sesión SSH de
+- **`npm run smoke:terminal-windows-session -- --desktop <zip>`** — lo que una sesión SSH de
   administrador no prueba: una cuenta **sin administrador** (`dtuser`, Node en su carpeta), **un
   reinicio de verdad** con inicio de sesión automático (el host ve la VM sin SSH: la levanta la
   entrada de `Run`), la app abierta **como con doble clic** (el Explorador, sin elevar, sin

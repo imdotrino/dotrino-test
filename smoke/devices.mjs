@@ -22,85 +22,74 @@ import { scenario, runScenarios, startProxy, teardown, ROOT } from './lib/harnes
 import { pubkeyId } from '../../dotrino-identity/vault/capabilities.js'
 import { createBox, destroyBoxes, pickEngine, ECO } from './lib/box.js'
 import { parseInvite } from '../../dotrino-vault/lib/src/invite.js'
+import { waitFor } from './lib/wait.js'
 
 const VERBOSE = process.argv.includes('--verbose')
 const log = (m) => { if (VERBOSE) console.log(m) }
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-const BINARIO = '/eco/dotrino-vault/dist/dotrino-vaultd'
+const BINARY = '/eco/dotrino-vault/dist/dotrino-vaultd'
 
 let proxy = null
-let boveda = null      // la caja donde corre el binario
+let vaultBox = null      // la caja donde corre el binario
 let vaultProc = null
-
-/** Espera a que una condición se cumpla, o se rinde con un mensaje claro. */
-async function esperar (fn, { timeoutMs = 25000, que = 'la condición' } = {}) {
-  const t = Date.now() + timeoutMs
-  while (Date.now() < t) {
-    const v = await fn()
-    if (v) return v
-    await sleep(200)
-  }
-  throw new Error('timed out waiting for ' + que)
-}
 
 // ---------- la bóveda, corriendo como BINARIO en su propia caja ----------
 
-async function levantarBoveda () {
-  boveda = createBox('boveda')
+async function startVaultBinary () {
+  vaultBox = createBox('vault')
   // El binario trae Node dentro, pero espera `libatomic1` del sistema — lo destapó este
   // mismo test en un Debian limpio, y por eso el `.deb` la declara ahora en `Depends`.
   // En una caja mínima hay que ponerla, igual que haría el usuario con el tarball.
-  if (boveda.motor === 'docker') {
-    const r = boveda.exec('ldconfig -p | grep -q libatomic || (apt-get update -qq && apt-get install -y -qq libatomic1) >/dev/null 2>&1; ldconfig -p | grep -c libatomic')
+  if (vaultBox.engine === 'docker') {
+    const r = vaultBox.exec('ldconfig -p | grep -q libatomic || (apt-get update -qq && apt-get install -y -qq libatomic1) >/dev/null 2>&1; ldconfig -p | grep -c libatomic')
     log('[vault] libatomic: ' + (r.stdout || '').trim())
   }
-  const salida = []
-  vaultProc = boveda.lanzar(`${BINARIO}`, {
+  const output = []
+  vaultProc = vaultBox.launch(`${BINARY}`, {
     env: { DOTRINO_VAULT_DIR: '/data/vault', PROXY_URL: proxy.url },
-    onLinea: (l) => { salida.push(l); log('[vault] ' + l) }
+    onLine: (l) => { output.push(l); log('[vault] ' + l) }
   })
-  await esperar(() => salida.some((l) => l.includes('servicio listo')), { que: 'que la bóveda arranque' })
-    .catch(() => { throw new Error('the vault (binary) did not start:\n' + salida.join('\n')) })
+  await waitFor(() => output.some((l) => l.includes('servicio listo')), { what: 'the vault to start' })
+    .catch(() => { throw new Error('the vault (binary) did not start:\n' + output.join('\n')) })
   // El estado se pregunta CON EL CLI, dentro de la caja. Desde 0.89 el canal local va
   // cifrado en reposo y la clave sale de la máquina que escribió: la caja puede abrir su
   // `state.json`, el anfitrión no. Preguntarlo por el CLI es además el camino de verdad.
-  const estado = { iss: null, version: null }
-  const st = boveda.exec(`${BINARIO} --ctl status`, { env: { DOTRINO_VAULT_DIR: '/data/vault' } }).stdout || ''
-  estado.version = (/versi[oó]n\s*:\s*(\S+)/i.exec(st) || [])[1] || null
-  estado.iss = (/fingerprint\s*:\s*(\S+)/i.exec(st) || [])[1] || null
-  return { estado, salida }
+  const status = { iss: null, version: null }
+  const st = vaultBox.exec(`${BINARY} --ctl status`, { env: { DOTRINO_VAULT_DIR: '/data/vault' } }).stdout || ''
+  status.version = (/versi[oó]n\s*:\s*(\S+)/i.exec(st) || [])[1] || null
+  status.iss = (/fingerprint\s*:\s*(\S+)/i.exec(st) || [])[1] || null
+  return { status, output }
 }
 
 /**
  * `dotrino-vault pair` con el CLI real del binario. Con `servicio` es `pair --service <ns>`:
  * el cert sale acotado a ese cajón y en el acta entra como SERVICIO con ese CN.
  */
-async function abrirEmparejamiento ({ servicio, scope } = {}) {
-  const lineas = []
-  boveda.lanzar(`${BINARIO} --ctl pair${servicio ? ' --service ' + servicio : ''}${scope ? ' --scope ' + scope : ''}`, {
+async function openPairing ({ service, scope } = {}) {
+  const lines = []
+  vaultBox.launch(`${BINARY} --ctl pair${service ? ' --service ' + service : ''}${scope ? ' --scope ' + scope : ''}`, {
     env: { DOTRINO_VAULT_DIR: '/data/vault' },
-    onLinea: (l) => { lineas.push(l.trim()); log('[pair] ' + l) }
+    onLine: (l) => { lines.push(l.trim()); log('[pair] ' + l) }
   })
   // Se parsea con `parseInvite` y NO buscando una línea JSON: el CLI dejó de
   // imprimir JSON cuando la invitación estrenó marca de formato — ahora imprime la
   // URL del QR y el código compacto. Este test esperaba `{"v":2` y por eso se
   // quedaba colgado hasta el timeout desde ese cambio.
-  return await esperar(() => {
-    for (const l of lineas) {
+  return await waitFor(() => {
+    for (const l of lines) {
       if (!l || l.length < 20) continue
       const o = parseInvite(l)
       if (o?.sn) return o
     }
     return null
-  }, { que: 'la invitación que imprime el CLI' })
+  }, { what: 'the invitation printed by the CLI' })
 }
 
-const aprobar = (code) => boveda.exec(`${BINARIO} --ctl approve ${code}`, { env: { DOTRINO_VAULT_DIR: '/data/vault' } })
+const approve = (code) => vaultBox.exec(`${BINARY} --ctl approve ${code}`, { env: { DOTRINO_VAULT_DIR: '/data/vault' } })
 
 /** `dotrino-vault members` — el acta tal y como la ve el dueño en su terminal. */
-function miembros () {
-  const r = boveda.exec(`${BINARIO} --ctl members`, { env: { DOTRINO_VAULT_DIR: '/data/vault' } })
+function members () {
+  const r = vaultBox.exec(`${BINARY} --ctl members`, { env: { DOTRINO_VAULT_DIR: '/data/vault' } })
   return r.stdout || ''
 }
 
@@ -110,48 +99,48 @@ function miembros () {
  * Cada uno con su propio código de enrolamiento: el REAL de su repo, no una imitación.
  * El guion imprime `CODE:<código>` cuando le toca mostrarlo y `OK:<json>` al terminar.
  */
-const DISPOSITIVOS = [
+const DEVICES = [
   {
-    nombre: 'navegador',
-    que: 'un navegador / PWA (y los bots): la identidad del ecosistema',
-    guion: `
+    name: 'browser',
+    what: 'a browser / PWA (and the bots): the ecosystem identity',
+    script: `
       import { Identity } from '/eco/dotrino-identity/src/node.js'
       const qr = JSON.parse(process.env.QR)
-      const id = await Identity.connect({ dir: '/data/identidad' })
+      const id = await Identity.connect({ dir: '/data/identity' })
       id.onVault((e) => { if (e.phase === 'challenge') console.log('CODE:' + e.code) })
-      const r = await id.enrollDevice(qr, { label: 'navegador', join: 'new' })
+      const r = await id.enrollDevice(qr, { label: 'browser', join: 'new' })
       const m = await id.myMembership()
-      console.log('OK:' + JSON.stringify({ pub: id.me.publickey, perfil: m.profileId, esMaster: m.isMaster, caps: m.caps }))
+      console.log('OK:' + JSON.stringify({ pub: id.me.publickey, profile: m.profileId, isMaster: m.isMaster, caps: m.caps }))
     `
   },
   {
-    nombre: 'cliente-node',
-    que: 'el cliente de dispositivo de referencia del vault',
-    guion: `
+    name: 'node-client',
+    what: 'the vault\'s reference device client',
+    script: `
       import { enroll } from '/eco/dotrino-vault/src/client.js'
       const qr = JSON.parse(process.env.QR)
-      const r = await enroll({ qr, label: 'cliente-node', dir: '/data/dev', onChallenge: (c) => console.log('CODE:' + c.code) })
+      const r = await enroll({ qr, label: 'node-client', dir: '/data/dev', onChallenge: (c) => console.log('CODE:' + c.code) })
       console.log('OK:' + JSON.stringify({ pub: r.device.publickey, cert: !!r.cert, iss: r.cert.iss === qr.iss }))
     `
   },
   {
     // LOS PERMISOS SE ELIGEN AL EMPAREJAR (vaultd 0.132.0): entra ya con `administra` y
     // `aprueba`, en la MISMA acta que lo admite — antes hacían falta dos.
-    nombre: 'con-permisos',
-    que: 'un aparato que entra YA con administra y aprueba, en una sola acta',
+    name: 'with-caps',
+    what: 'a device that joins already with administra and aprueba, in a single record',
     scope: 'firma,lee,administra,aprueba',
-    permisos: ['administra el perfil', 'aprueba pedidos'],
-    guion: `
+    permissions: ['administra el perfil', 'aprueba pedidos'],
+    script: `
       import { enroll } from '/eco/dotrino-vault/src/client.js'
       const qr = JSON.parse(process.env.QR)
-      const r = await enroll({ qr, label: 'con-permisos', dir: '/data/perm', onChallenge: (c) => console.log('CODE:' + c.code) })
+      const r = await enroll({ qr, label: 'with-caps', dir: '/data/perm', onChallenge: (c) => console.log('CODE:' + c.code) })
       console.log('OK:' + JSON.stringify({ pub: r.device.publickey, cert: !!r.cert }))
     `
   },
   {
-    nombre: 'terminal',
-    que: 'el agente de dotrino-terminal',
-    guion: `
+    name: 'terminal',
+    what: 'the dotrino-terminal agent',
+    script: `
       import { enroll } from '/eco/dotrino-terminal/agent/link.js'
       const qr = JSON.parse(process.env.QR)
       const r = await enroll({ qr, dir: '/data/terminal', onChallenge: (c) => console.log('CODE:' + c.code) })
@@ -159,9 +148,9 @@ const DISPOSITIVOS = [
     `
   },
   {
-    nombre: 'ia',
-    que: 'el agente de dotrino-ia (reusa el enrolamiento de remote-agent)',
-    guion: `
+    name: 'ia',
+    what: 'the dotrino-ia agent (reuses remote-agent enrollment)',
+    script: `
       import { enroll } from '/eco/dotrino-remote-agent/src/link.js'
       const qr = JSON.parse(process.env.QR)
       const r = await enroll({ qr, label: 'ia-agent', dir: '/data/ia', onChallenge: (c) => console.log('CODE:' + c.code) })
@@ -169,121 +158,121 @@ const DISPOSITIVOS = [
     `
   },
   {
-    nombre: 'remote-agent',
-    que: 'el agente remoto genérico',
-    guion: `
+    name: 'remote-agent',
+    what: 'the generic remote agent',
+    script: `
       import { enroll } from '/eco/dotrino-remote-agent/src/link.js'
       const qr = JSON.parse(process.env.QR)
-      const r = await enroll({ qr, label: 'remote-agent', dir: '/data/remoto', onChallenge: (c) => console.log('CODE:' + c.code) })
+      const r = await enroll({ qr, label: 'remote-agent', dir: '/data/remote', onChallenge: (c) => console.log('CODE:' + c.code) })
       console.log('OK:' + JSON.stringify({ pub: r.device.publickey, cert: !!r.cert }))
     `
   },
   {
-    nombre: 'servicio-proxy',
-    que: 'un SERVICIO (entra con CN: solo ve su propio cajón)',
-    servicio: 'proxy',
-    guion: `
+    name: 'proxy-service',
+    what: 'a SERVICE (joins with a CN: only sees its own drawer)',
+    service: 'proxy',
+    script: `
       import { enrollService } from '/eco/dotrino-vault/lib/src/service.js'
       const qr = JSON.parse(process.env.QR)
-      const r = await enrollService({ qr, ns: 'proxy', dir: '/data/servicio', onCode: (c) => console.log('CODE:' + (typeof c === 'string' ? c : c.code)) })
+      const r = await enrollService({ qr, ns: 'proxy', dir: '/data/service', onCode: (c) => console.log('CODE:' + (typeof c === 'string' ? c : c.code)) })
       console.log('OK:' + JSON.stringify({ pub: r.device.publickey, ns: 'proxy' }))
     `
   }
 ]
 
 /** El identificador con el que la bóveda lista a una llave (`AB12-CD34`). */
-async function idDe (pub) {
+async function idOf (pub) {
   const h = (await pubkeyId(pub)).slice(0, 8).toUpperCase()
   return h.slice(0, 4) + '-' + h.slice(4)
 }
 
 /** Corre un dispositivo en su propia caja y devuelve lo que reportó. */
-async function emparejar (d) {
-  const caja = createBox(d.nombre)
-  const qr = await abrirEmparejamiento(d)
+async function pair (d) {
+  const box = createBox(d.name)
+  const qr = await openPairing(d)
 
-  caja.escribir('/data/guion.mjs', d.guion)
-  let code = null; let ok = null; const lineas = []
-  caja.lanzar('node /data/guion.mjs', {
+  box.write('/data/script.mjs', d.script)
+  let code = null; let ok = null; const lines = []
+  box.launch('node /data/script.mjs', {
     env: { QR: JSON.stringify(qr) },
-    onLinea: (l) => {
-      lineas.push(l)
-      log(`[${d.nombre}] ` + l)
+    onLine: (l) => {
+      lines.push(l)
+      log(`[${d.name}] ` + l)
       if (l.startsWith('CODE:')) code = l.slice(5).trim()
       if (l.startsWith('OK:')) ok = JSON.parse(l.slice(3))
     }
   })
 
-  await esperar(() => code, { que: `el código que muestra «${d.nombre}»` })
-    .catch(() => { throw new Error(`${d.nombre} showed no code:\n` + lineas.join('\n')) })
-  aprobar(code)
-  await esperar(() => ok, { que: `que «${d.nombre}» termine de emparejarse` })
-    .catch(() => { throw new Error(`${d.nombre} did not finish pairing:\n` + lineas.join('\n')) })
+  await waitFor(() => code, { what: `the code shown by «${d.name}»` })
+    .catch(() => { throw new Error(`${d.name} showed no code:\n` + lines.join('\n')) })
+  approve(code)
+  await waitFor(() => ok, { what: `«${d.name}» to finish pairing` })
+    .catch(() => { throw new Error(`${d.name} did not finish pairing:\n` + lines.join('\n')) })
 
-  return { caja, code, ...ok }
+  return { box, code, ...ok }
 }
 
 // ---------- escenarios ----------
 
-const emparejados = []
+const paired = []
 
-scenario('la bóveda arranca COMO BINARIO y su CLI responde', async () => {
-  const { estado } = await levantarBoveda()
-  assert.ok(estado.iss, 'publica su identidad')
-  assert.ok(estado.version, 'y su versión: ' + estado.version)
-  const salida = miembros()
-  assert.match(salida, /Perfil/, 'el CLI del binario muestra el acta')
+scenario('the vault starts AS A BINARY and its CLI answers', async () => {
+  const { status } = await startVaultBinary()
+  assert.ok(status.iss, 'it publishes its identity')
+  assert.ok(status.version, 'and its version: ' + status.version)
+  const output = members()
+  assert.match(output, /Perfil/, 'the binary\'s CLI shows the record')
 })
 
-for (const d of DISPOSITIVOS) {
-  scenario(`empareja ${d.nombre} — ${d.que}`, async () => {
-    const actaAntes = Number((/acta #(\d+)/.exec(miembros()) || [])[1])
-    const r = await emparejar(d)
-    assert.ok(r.pub, 'generó su propia llave, en su propia máquina')
-    emparejados.push({ ...r, def: d })
+for (const d of DEVICES) {
+  scenario(`pairs ${d.name} — ${d.what}`, async () => {
+    const recordBefore = Number((/acta #(\d+)/.exec(members()) || [])[1])
+    const r = await pair(d)
+    assert.ok(r.pub, 'it generated its own key, on its own machine')
+    paired.push({ ...r, def: d })
 
     // Y la bóveda lo tiene en su acta: se comprueba por el IDENTIFICADOR de su llave, que
     // es lo que de verdad lo identifica (la etiqueta es un nombre para el humano).
-    const salida = miembros()
-    const suId = await idDe(r.pub)
-    assert.ok(salida.includes(suId), `la bóveda no lista a ${d.nombre} (${suId}):\n` + salida)
-    if (d.servicio) assert.match(salida, new RegExp(`servicio «${d.servicio}»`), 'y como servicio')
-    if (d.permisos) {
+    const output = members()
+    const itsId = await idOf(r.pub)
+    assert.ok(output.includes(itsId), `the vault does not list ${d.name} (${itsId}):\n` + output)
+    if (d.service) assert.match(output, new RegExp(`servicio «${d.service}»`), 'and as a service')
+    if (d.permissions) {
       // La línea de permisos va justo debajo de la del aparato.
-      const lineas = salida.replace(/\x1b\[[0-9;]*m/g, '').split('\n')
-      const i = lineas.findIndex((l) => l.includes(suId))
-      for (const p of d.permisos) assert.ok((lineas[i + 1] || '').includes(p), `${d.nombre} no entró con «${p}»:\n` + salida)
-      const actaDespues = Number((/acta #(\d+)/.exec(salida) || [])[1])
-      assert.equal(actaDespues, actaAntes + 1, 'entrar con sus permisos cuesta UNA acta, no dos')
+      const lines = output.replace(/\x1b\[[0-9;]*m/g, '').split('\n')
+      const i = lines.findIndex((l) => l.includes(itsId))
+      for (const p of d.permissions) assert.ok((lines[i + 1] || '').includes(p), `${d.name} did not join with «${p}»:\n` + output)
+      const recordAfter = Number((/acta #(\d+)/.exec(output) || [])[1])
+      assert.equal(recordAfter, recordBefore + 1, 'joining with its permissions costs ONE record, not two')
     }
   })
 }
 
-scenario('la terminal abre una shell entre dos máquinas, y al volver sigue ahí con su pantalla', async () => {
-  const agente = emparejados.find((e) => e.def.nombre === 'terminal')
-  const cliente = emparejados.find((e) => e.def.nombre === 'remote-agent')
-  assert.ok(agente && cliente, 'hacen falta la máquina de la terminal y otro aparato de la cuenta')
+scenario('the terminal opens a shell between two machines, and on return it is still there with its screen', async () => {
+  const agent = paired.find((e) => e.def.name === 'terminal')
+  const client = paired.find((e) => e.def.name === 'remote-agent')
+  assert.ok(agent && client, 'needs the terminal machine and another device of the account')
 
   // La máquina: el agente de verdad, con su PTY, en su caja.
-  const salidaAgente = []
-  agente.caja.escribir('/data/agente.mjs', `
+  const agentOutput = []
+  agent.box.write('/data/agent.mjs', `
     import { startAgent } from '/eco/dotrino-terminal/agent/index.js'
     const a = await startAgent({ dir: '/data/terminal', shell: '/bin/sh' })
     console.log('READY:' + a.machine)
     setInterval(() => {}, 1 << 30)
   `)
-  agente.caja.lanzar('node /data/agente.mjs', { onLinea: (l) => { salidaAgente.push(l); log('[agent] ' + l) } })
-  await esperar(() => salidaAgente.some((l) => l.startsWith('READY:')), { que: 'que el agente de terminal arranque' })
-    .catch(() => { throw new Error('the agent did not start:\n' + salidaAgente.join('\n')) })
+  agent.box.launch('node /data/agent.mjs', { onLine: (l) => { agentOutput.push(l); log('[agent] ' + l) } })
+  await waitFor(() => agentOutput.some((l) => l.startsWith('READY:')), { what: 'the terminal agent to start' })
+    .catch(() => { throw new Error('the agent did not start:\n' + agentOutput.join('\n')) })
 
   // El otro aparato: el MISMO cliente que usa la PWA, con la identidad de su enlace.
-  const lineas = []
+  const lines = []
   let ok = false
-  cliente.caja.escribir('/data/console.mjs', `
+  client.box.write('/data/console.mjs', `
     import { loadLink, clientLink } from '/eco/dotrino-remote-agent/src/link.js'
     import { RemoteAgentClient } from '/eco/dotrino-remote-agent/src/client.js'
     import { probeAgents } from '/eco/dotrino-remote-agent/src/discover.js'
-    const link = clientLink(loadLink('/data/remoto'), { dir: '/data/remoto' })
+    const link = clientLink(loadLink('/data/remoto'), { dir: '/data/remote' })
     // El agente trae el acta en su primer tic: hasta entonces no atiende a nadie, y
     // eso es lo correcto. Se reintenta el saludo, no se relaja.
     let rc
@@ -297,69 +286,69 @@ scenario('la terminal abre una shell entre dos máquinas, y al volver sigue ahí
     if (found.get(process.env.AGENT)?.kind !== 'terminal-agent') { console.log('FAIL: kind ' + JSON.stringify([...found])); process.exit(1) }
     setTimeout(() => { console.log('FAIL: timeout'); process.exit(1) }, 30000)
     // Espera el primer mensaje de ese tipo (o que la salida acumulada contenga algo).
-    const esperar = (c, cond) => new Promise((res) => { const off = c.on('message', (p) => { if (cond(p)) { off(); res(p) } }) })
+    const waitMessage = (c, cond) => new Promise((res) => { const off = c.on('message', (p) => { if (cond(p)) { off(); res(p) } }) })
     let out = ''
     rc.on('message', (p) => { if (p.type === 'out' || p.type === 'replay') out += p.data })
-    const abierta = esperar(rc, (p) => p.type === 'attached')
+    const opened = waitMessage(rc, (p) => p.type === 'attached')
     await rc.send({ type: 'open', cols: 80, rows: 24 })
-    const { id } = await abierta
-    const eco = esperar(rc, () => out.includes('dotrino-42'))
+    const { id } = await opened
+    const echoed = waitMessage(rc, () => out.includes('dotrino-42'))
     await rc.send({ type: 'input', data: 'echo dotrino-$((40+2))\\r' })
-    await eco
+    await echoed
     await rc.close()                                   // el navegador se fue: la consola sigue
 
     // Otra conexión (otro aparato, o el mismo tras recargar) vuelve y ve la pantalla.
     const rc2 = new RemoteAgentClient(link, { agentPubkey: process.env.AGENT })
     await rc2.connect()
-    const lista = esperar(rc2, (p) => p.type === 'consoles')
+    const list = waitMessage(rc2, (p) => p.type === 'consoles')
     await rc2.send({ type: 'list' })
-    if (!(await lista).list.some((c) => c.id === id)) { console.log('FAIL: console gone after leaving'); process.exit(1) }
-    let pantalla = ''
-    rc2.on('message', (p) => { if (p.type === 'replay') pantalla += p.data })
-    const enganchada = esperar(rc2, (p) => p.type === 'attached')
+    if (!(await list).list.some((c) => c.id === id)) { console.log('FAIL: console gone after leaving'); process.exit(1) }
+    let screen = ''
+    rc2.on('message', (p) => { if (p.type === 'replay') screen += p.data })
+    const attached = waitMessage(rc2, (p) => p.type === 'attached')
     await rc2.send({ type: 'attach', id, cols: 80, rows: 24 })
-    await enganchada
-    if (!pantalla.includes('dotrino-42')) { console.log('FAIL: screen not restored ' + JSON.stringify(pantalla.slice(-200))); process.exit(1) }
+    await attached
+    if (!screen.includes('dotrino-42')) { console.log('FAIL: screen not restored ' + JSON.stringify(screen.slice(-200))); process.exit(1) }
     console.log('OK'); process.exit(0)
   `)
-  cliente.caja.lanzar('node /data/console.mjs', {
-    env: { AGENT: agente.pub },
-    onLinea: (l) => { lineas.push(l); log('[consola] ' + l); if (l === 'OK') ok = true }
+  client.box.launch('node /data/console.mjs', {
+    env: { AGENT: agent.pub },
+    onLine: (l) => { lines.push(l); log('[console] ' + l); if (l === 'OK') ok = true }
   })
-  await esperar(() => ok || lineas.some((l) => l.startsWith('FAIL')), { timeoutMs: 45000, que: 'la salida de la shell remota' })
-  assert.ok(ok, 'la shell remota no devolvió la salida:\n' + lineas.join('\n') + '\n--- agente ---\n' + salidaAgente.join('\n'))
+  await waitFor(() => ok || lines.some((l) => l.startsWith('FAIL')), { timeoutMs: 45000, what: 'the remote shell output' })
+  assert.ok(ok, 'the remote shell did not return the output:\n' + lines.join('\n') + '\n--- agent ---\n' + agentOutput.join('\n'))
 })
 
-scenario('cada dispositivo tiene SU llave y ninguno ve el disco de otro', async () => {
-  const pubs = emparejados.map((e) => e.pub)
-  assert.equal(new Set(pubs).size, pubs.length, 'no hay dos con la misma llave')
+scenario('each device has ITS key and none sees another\'s disk', async () => {
+  const pubs = paired.map((e) => e.pub)
+  assert.equal(new Set(pubs).size, pubs.length, 'no two share a key')
 
   // Nadie tiene los datos de nadie: cada caja solo tiene lo suyo.
-  for (const e of emparejados) {
-    const ajenos = emparejados.filter((o) => o !== e)
-    const listado = e.caja.exec('ls -R /data 2>/dev/null | head -50').stdout || ''
-    for (const o of ajenos) {
-      assert.ok(!listado.includes(o.def.nombre === 'navegador' ? 'identidad-ajena' : o.def.nombre + '-ajeno'),
-        'ninguna caja contiene datos de otra')
+  for (const e of paired) {
+    const others = paired.filter((o) => o !== e)
+    const listing = e.box.exec('ls -R /data 2>/dev/null | head -50').stdout || ''
+    for (const o of others) {
+      assert.ok(!listing.includes(o.def.name === 'browser' ? 'foreign-identity' : o.def.name + '-foreign'),
+        'no box holds another box\'s data')
     }
   }
 })
 
-scenario('el acta de la bóveda tiene a todos, y el servicio entra acotado por su CN', async () => {
-  const salida = miembros()
-  for (const e of emparejados) {
-    const suId = await idDe(e.pub)
-    assert.ok(salida.includes(suId), `falta ${e.def.nombre} (${suId}) en el acta:\n` + salida)
+scenario('the vault record has everyone, and the service joins scoped by its CN', async () => {
+  const output = members()
+  for (const e of paired) {
+    const itsId = await idOf(e.pub)
+    assert.ok(output.includes(itsId), `${e.def.name} (${itsId}) is missing from the record:\n` + output)
   }
-  assert.equal(emparejados.length, DISPOSITIVOS.length, 'emparejaron todos los dispositivos')
-  assert.match(salida, /servicio «proxy»/, 'el servicio se distingue de los dispositivos')
-  assert.match(salida, /lee sus claves/, 'y solo puede leer sus propias claves')
+  assert.equal(paired.length, DEVICES.length, 'all devices paired')
+  assert.match(output, /servicio «proxy»/, 'the service is told apart from the devices')
+  assert.match(output, /lee sus claves/, 'and it can only read its own keys')
 })
 
 // ---------- arranque ----------
 
-const motor = pickEngine()
-console.log(`\nSMOKE · per-device pairing, in ephemeral instances (engine: ${motor})\n`)
+const engine = pickEngine()
+console.log(`\nSMOKE · per-device pairing, in ephemeral instances (engine: ${engine})\n`)
 if (!fs.existsSync(path.join(ROOT, 'dotrino-vault/dist/dotrino-vaultd'))) {
   console.error('Missing the binary. Build it with:  cd dotrino-vault && bash packaging/build.sh\n')
   process.exit(2)

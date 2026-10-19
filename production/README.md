@@ -10,4 +10,4 @@ perfil de navegador nuevo que se borra al acabar.
 
 | | Qué prueba | Por qué no puede ser local |
 |---|---|---|
-| `npm run prod:timbre` | que el proxio despierte por Web Push a una bóveda apagada, y que la cola baje al volver | hace falta un servicio de push de verdad al que el navegador esté conectado |
+| `npm run prod:doorbell` | que el proxio despierte por Web Push a una bóveda apagada, y que la cola baje al volver | hace falta un servicio de push de verdad al que el navegador esté conectado |

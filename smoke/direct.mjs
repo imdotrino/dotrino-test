@@ -23,98 +23,98 @@ import { createBox, destroyBoxes, pickEngine } from './lib/box.js'
 
 const VERBOSE = process.argv.includes('--verbose')
 const log = (m) => { if (VERBOSE) console.log(m) }
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+import { sleep } from './lib/wait.js'
 
 let proxy = null
-const cajas = {}
+const boxes = {}
 
 /**
  * El guion que corre DENTRO de cada caja. Se cuenta lo que sale por el proxio envolviendo
  * su `_sendRaw`: es la única medida que responde la pregunta de verdad —«¿pasó por ahí?»—
  * en vez de fiarse de una bandera.
  */
-const GUION = `
+const SCRIPT = `
 import { WebSocketProxyClient } from '/eco/dotrino-proxy-client/src/client.js'
 import { loadNodePeerConnection } from '/eco/dotrino-proxy-client/src/webrtc.js'
 
-const [,, url, rol, otro] = process.argv
-const hayWebRTC = !!(await loadNodePeerConnection())
-console.log('WEBRTC=' + hayWebRTC)
+const [,, url, role, other] = process.argv
+const hasWebRTC = !!(await loadNodePeerConnection())
+console.log('WEBRTC=' + hasWebRTC)
 
 const c = new WebSocketProxyClient({ url, enableWebRTC: true, autoReconnect: false })
-let porProxio = 0
+let viaProxy = 0
 const raw = c._sendRaw.bind(c)
-c._sendRaw = (env) => { if (env?.message) porProxio++; return raw(env) }
+c._sendRaw = (env) => { if (env?.message) viaProxy++; return raw(env) }
 
 const token = await c.connect()
 console.log('TOKEN=' + token)
 
-if (rol === 'b') {
+if (role === 'b') {
   c.on('message', (_f, p) => console.log('RECEIVED=' + JSON.stringify(p)))
   setInterval(() => {}, 1000)
 } else {
   // Esperar a que el otro exista antes de hablarle.
   await new Promise((r) => setTimeout(r, 4000))
-  c.send(otro, { n: 1 })
-  console.log('SENT=1 viaProxy=' + porProxio)
+  c.send(other, { n: 1 })
+  console.log('SENT=1 viaProxy=' + viaProxy)
   // El canal directo se pidió solo al mandar el primero.
-  for (let i = 0; i < 80 && !c.isWebRTCOpen(otro); i++) await new Promise((r) => setTimeout(r, 500))
-  console.log('DIRECT=' + c.isWebRTCOpen(otro))
-  const antes = porProxio
-  c.send(otro, { n: 2 })
-  console.log('SENT=2 newViaProxy=' + (porProxio - antes))
+  for (let i = 0; i < 80 && !c.isWebRTCOpen(other); i++) await new Promise((r) => setTimeout(r, 500))
+  console.log('DIRECT=' + c.isWebRTCOpen(other))
+  const before = viaProxy
+  c.send(other, { n: 2 })
+  console.log('SENT=2 newViaProxy=' + (viaProxy - before))
   setInterval(() => {}, 1000)
 }
 `
 
-function caja (nombre) {
-  const c = createBox(nombre)
-  const salida = []
-  cajas[nombre] = { caja: c, salida }
-  c.escribir('/data/nodo.mjs', GUION)
-  return cajas[nombre]
+function box (name) {
+  const c = createBox(name)
+  const output = []
+  boxes[name] = { box: c, output }
+  c.write('/data/node.mjs', SCRIPT)
+  return boxes[name]
 }
 
-const lanzar = (n, rol, otro = '') => {
-  const b = cajas[n]
-  b.caja.lanzar(`node /data/nodo.mjs ${proxy.url} ${rol} ${otro}`, {
+const launch = (n, role, other = '') => {
+  const b = boxes[n]
+  b.box.launch(`node /data/node.mjs ${proxy.url} ${role} ${other}`, {
     env: { HOME: '/data' },
-    onLinea: (l) => { b.salida.push(l.trim()); log(`[${n}] ` + l) }
+    onLine: (l) => { b.output.push(l.trim()); log(`[${n}] ` + l) }
   })
 }
 
-const esperar = async (b, re, que, ms = 60000) => {
+const waitForLine = async (b, re, what, ms = 60000) => {
   const t = Date.now() + ms
   while (Date.now() < t) {
-    const l = b.salida.find((x) => re.test(x))
+    const l = b.output.find((x) => re.test(x))
     if (l) return re.exec(l)
     await sleep(200)
   }
-  throw new Error('timed out waiting for ' + que + '\n  output:\n    ' + b.salida.join('\n    '))
+  throw new Error('timed out waiting for ' + what + '\n  output:\n    ' + b.output.join('\n    '))
 }
 
-scenario('dos máquinas Node, y las dos tienen WebRTC', async () => {
+scenario('two Node machines, and both have WebRTC', async () => {
   if (pickEngine() !== 'docker') {
     throw new Error('this needs Docker: in local boxes both «nodes» share a machine and it would prove nothing')
   }
   proxy = await startProxy({ log })
-  const a = caja('nodo-a')
-  const b = caja('nodo-b')
-  lanzar('nodo-b', 'b')
-  const tb = (await esperar(b, /^TOKEN=(.+)$/, 'el token de B'))[1]
-  lanzar('nodo-a', 'a', tb)
-  await esperar(a, /^TOKEN=/, 'el token de A')
+  const a = box('node-a')
+  const b = box('node-b')
+  launch('node-b', 'b')
+  const tb = (await waitForLine(b, /^TOKEN=(.+)$/, "B's token"))[1]
+  launch('node-a', 'a', tb)
+  await waitForLine(a, /^TOKEN=/, "A's token")
 
-  for (const [n, c] of [['nodo-a', a], ['nodo-b', b]]) {
-    const m = await esperar(c, /^WEBRTC=(\w+)$/, 'si ' + n + ' tiene WebRTC')
-    assert.equal(m[1], 'true', n + ' tiene que poder hablar WebRTC en Node')
+  for (const [n, c] of [['node-a', a], ['node-b', b]]) {
+    const m = await waitForLine(c, /^WEBRTC=(\w+)$/, 'whether ' + n + ' has WebRTC')
+    assert.equal(m[1], 'true', n + ' must be able to speak WebRTC in Node')
   }
 })
 
-scenario('el PRIMER mensaje va por el proxio: no se espera a negociar nada', async () => {
-  const m = await esperar(cajas['nodo-a'], /^SENT=1 viaProxy=(\d+)$/, 'el primer envío')
-  assert.equal(m[1], '1', 'salió por el proxio, que es lo que hay en ese momento')
-  const r = await esperar(cajas['nodo-b'], /^RECEIVED=(.+)$/, 'que B lo reciba')
+scenario('the FIRST message goes through the proxy: nothing waits for negotiation', async () => {
+  const m = await waitForLine(boxes['node-a'], /^SENT=1 viaProxy=(\d+)$/, 'the first send')
+  assert.equal(m[1], '1', 'it went through the proxy, which is what is available at that moment')
+  const r = await waitForLine(boxes['node-b'], /^RECEIVED=(.+)$/, 'B to receive it')
   assert.deepEqual(JSON.parse(r[1]), { n: 1 })
 })
 
@@ -123,16 +123,16 @@ scenario('el PRIMER mensaje va por el proxio: no se espera a negociar nada', asy
  * sino que **el mensaje ya no pasa por el proxio**: lo primero podría ser cierto y lo
  * segundo no si el enrutado se rompiera.
  */
-scenario('y el SEGUNDO ya va directo, sin tocar el proxio', async () => {
-  const abierto = await esperar(cajas['nodo-a'], /^DIRECT=(\w+)$/, 'que se abra el canal directo')
-  assert.equal(abierto[1], 'true', 'el canal directo se abre SOLO, sin que nadie lo pida')
+scenario('and the SECOND one goes direct, without touching the proxy', async () => {
+  const opened = await waitForLine(boxes['node-a'], /^DIRECT=(\w+)$/, 'the direct channel to open')
+  assert.equal(opened[1], 'true', 'the direct channel opens ON ITS OWN, without anyone asking')
 
-  const m = await esperar(cajas['nodo-a'], /^SENT=2 newViaProxy=(\d+)$/, 'el segundo envío')
-  assert.equal(m[1], '0', 'el segundo mensaje NO pasó por el proxio')
+  const m = await waitForLine(boxes['node-a'], /^SENT=2 newViaProxy=(\d+)$/, 'the second send')
+  assert.equal(m[1], '0', 'the second message did NOT go through the proxy')
 
-  const recibidos = cajas['nodo-b'].salida.filter((l) => l.startsWith('RECEIVED='))
-  await esperar(cajas['nodo-b'], /^RECEIVED=.*"n":2/, 'que B reciba el segundo')
-  assert.ok(recibidos.length >= 1, 'y llegó igual, por el otro camino')
+  const received = boxes['node-b'].output.filter((l) => l.startsWith('RECEIVED='))
+  await waitForLine(boxes['node-b'], /^RECEIVED=.*"n":2/, 'B to receive the second one')
+  assert.ok(received.length >= 1, 'and it still arrived, by the other path')
 })
 
 await runScenarios()

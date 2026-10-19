@@ -18,9 +18,9 @@
  * quien canjea. Se comprueban por separado a propósito: así, si falla, se ve de qué
  * lado está el problema en vez de tener un «no empareja» sin dueño.
  *
- *   node smoke/short-pairing.mjs [--consola <ruta al dist>] [--iframe <ruta>] [--verbose]
+ *   node smoke/short-pairing.mjs [--console <ruta al dist>] [--iframe <ruta>] [--verbose]
  *
- * `--consola` y `--iframe` sirven para correrlo contra el build de otra rama y comparar.
+ * `--console` y `--iframe` sirven para correrlo contra el build de otra rama y comparar.
  *
  * ESTADO HOY (2026-08-04): el (2) FALLA con el iframe del repo, y no es culpa de la
  * consola. `dotrino-identity/vault/vendor/proxy-client` es una copia vendorizada de
@@ -45,9 +45,9 @@ const require = createRequire(import.meta.url)
 const VERBOSE = process.argv.includes('--verbose')
 const log = (m) => { if (VERBOSE) console.log(m) }
 
-const argConsola = process.argv.indexOf('--consola')
-const CONSOLA = argConsola > -1
-  ? path.resolve(process.argv[argConsola + 1])
+const argConsole = process.argv.indexOf('--console')
+const CONSOLE = argConsole > -1
+  ? path.resolve(process.argv[argConsole + 1])
   : path.join(ROOT, 'dotrino-vault/web/dist')
 const argIframe = process.argv.indexOf('--iframe')
 const IFRAME = argIframe > -1
@@ -56,17 +56,17 @@ const IFRAME = argIframe > -1
 
 let proxy = null
 let vault = null
-let webConsola = null
+let webConsole = null
 let webIframe = null
-let navegador = null
-let contexto = null
+let browser = null
+let context = null
 
 /**
  * Identidad de nodo del proxio. Sin ella no hay citas y la bóveda emite la invitación
  * larga, que es justo lo que este escenario NO quiere probar. Misma forma que la que
  * escribe el vault al enrolar un servicio.
  */
-function identidadDeNodo (dir) {
+function nodeIdentity (dir) {
   const kp = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' })
   const publicJwk = kp.publicKey.export({ format: 'jwk' })
   const privateJwk = kp.privateKey.export({ format: 'jwk' })
@@ -82,9 +82,9 @@ function identidadDeNodo (dir) {
 }
 
 /** El proxio, pero CON identidad de nodo (el harness lo levanta sin ella). */
-async function startProxyConNodo () {
+async function startProxyWithNode () {
   const port = await freePort()
-  const dir = identidadDeNodo(path.join(tmpDir('proxy-nodo'), 'vault-service'))
+  const dir = nodeIdentity(path.join(tmpDir('proxy-node'), 'vault-service'))
   const child = spawn(process.execPath, ['server.js'], {
     cwd: path.join(ROOT, 'dotrino-proxy'),
     env: { ...process.env, PORT: String(port), NODE_ENV: 'test', VAULT_SERVICE_DIR: dir },
@@ -97,18 +97,18 @@ async function startProxyConNodo () {
 }
 
 /** La invitación tal y como viaja: el texto que va en el QR y en el `#fragment`. */
-function textoDeInvitacion (qr, proxyUrl) {
+function inviteText (qr, proxyUrl) {
   const { encodeInvite } = require(path.join(ROOT, 'dotrino-vault/lib/src/invite.js'))
   return encodeInvite({ ...qr, proxy: qr.proxy || proxyUrl })
 }
 
 /** Abre la consola con la invitación en el `#fragment`, apuntando al iframe local. */
-async function abrirConsola (hash = '') {
-  const page = await contexto.newPage()
+async function openConsole (hash = '') {
+  const page = await context.newPage()
   page.on('console', (m) => log('[browser] ' + m.text()))
   page.on('pageerror', (e) => log('[browser!] ' + e.message))
   await page.goto(
-    `${webConsola.url}/vault?vault=${encodeURIComponent(webIframe.url + '/?proxy=' + encodeURIComponent(proxy.url))}&proxy=${encodeURIComponent(proxy.url)}${hash}`
+    `${webConsole.url}/vault?vault=${encodeURIComponent(webIframe.url + '/?proxy=' + encodeURIComponent(proxy.url))}&proxy=${encodeURIComponent(proxy.url)}${hash}`
   )
   // Con invitación en el fragmento la consola se va DIRECTA al proceso, y entonces la
   // lista de miembros no se pinta: se espera a lo que llegue primero.
@@ -119,106 +119,106 @@ async function abrirConsola (hash = '') {
   return page
 }
 
-let invitacion = null
+let invite = null
 
-scenario('la bóveda emite la invitación CORTA cuando el proxio sabe dar citas', async () => {
-  const qr = await vault.pair({ label: 'navegador-corto' })
+scenario('the vault issues the SHORT invite when the proxy can issue appointments', async () => {
+  const qr = await vault.pair({ label: 'browser-short' })
   log('[vault] qr: ' + JSON.stringify(qr))
-  assert.ok(qr.conn || (qr.iss && qr.token), 'la bóveda publicó algo emparejable')
-  assert.ok(qr.sn, 'con su nonce de sesión')
-  assert.ok(qr.conn, 'y es la forma CORTA (una cita del proxio), no la larga con la llave')
+  assert.ok(qr.conn || (qr.iss && qr.token), 'the vault published something pairable')
+  assert.ok(qr.sn, 'with its session nonce')
+  assert.ok(qr.conn, 'and it is the SHORT form (a proxy appointment), not the long one with the key')
 
-  invitacion = textoDeInvitacion(qr, proxy.url)
-  log('[vault] invite: ' + invitacion)
-  assert.ok(invitacion.length < 160, 'la invitación es corta de verdad: ' + invitacion.length)
+  invite = inviteText(qr, proxy.url)
+  log('[vault] invite: ' + invite)
+  assert.ok(invite.length < 160, 'the invite is really short: ' + invite.length)
 })
 
-scenario('la consola ACEPTA la invitación corta (no la descarta como inválida)', async () => {
-  const page = await abrirConsola('#v=' + encodeURIComponent(invitacion))
+scenario('the console ACCEPTS the short invite (does not discard it as invalid)', async () => {
+  const page = await openConsole('#v=' + encodeURIComponent(invite))
 
   // Lo que rompía antes: `extractPayload`/`announce` exigían `iss`+`token`, que la
   // invitación corta no lleva, así que la consola contestaba «código no válido» y
   // no llegaba a intentar nada.
-  const rechazo = page.locator('.msg.bad, [data-testid="pair-error"]')
-  const proceso = page.locator('[data-testid="pair-flow"], [data-testid="pair-code"], .pair-flow')
+  const rejection = page.locator('.msg.bad, [data-testid="pair-error"]')
+  const flow = page.locator('[data-testid="pair-flow"], [data-testid="pair-code"], .pair-flow')
 
   await Promise.race([
-    proceso.first().waitFor({ timeout: 20000 }).catch(() => {}),
-    rechazo.first().waitFor({ timeout: 20000 }).catch(() => {})
+    flow.first().waitFor({ timeout: 20000 }).catch(() => {}),
+    rejection.first().waitFor({ timeout: 20000 }).catch(() => {})
   ])
 
-  const textoRechazo = await rechazo.first().isVisible().catch(() => false)
-    ? await rechazo.first().innerText()
+  const rejectionText = await rejection.first().isVisible().catch(() => false)
+    ? await rejection.first().innerText()
     : ''
   assert.ok(
-    !/no válido|inválid|invalid|antigua|old version/i.test(textoRechazo),
-    'la consola no la descarta: ' + textoRechazo
+    !/no válido|inválid|invalid|antigua|old version/i.test(rejectionText),
+    'the console does not discard it: ' + rejectionText
   )
   assert.ok(
-    await proceso.first().isVisible().catch(() => false),
-    'y arranca el proceso de emparejamiento'
+    await flow.first().isVisible().catch(() => false),
+    'and it starts the pairing flow'
   )
   await page.close()
 })
 
-scenario('y la canjea contra el proxio hasta enseñar los seis dígitos', async () => {
+scenario('and redeems it against the proxy until it shows the six digits', async () => {
   // Invitación NUEVA: la cita es de un solo uso y el escenario anterior gastó la suya.
-  const fresca = textoDeInvitacion(await vault.pair({ label: 'navegador-corto-2' }), proxy.url)
-  const page = await abrirConsola('#v=' + encodeURIComponent(fresca))
-  const caja = page.locator('[data-testid="pair-code"] .digits')
+  const fresh = inviteText(await vault.pair({ label: 'browser-short-2' }), proxy.url)
+  const page = await openConsole('#v=' + encodeURIComponent(fresh))
+  const codeBox = page.locator('[data-testid="pair-code"] .digits')
   const error = page.locator('[data-testid="pair-error"]')
   await Promise.race([
-    caja.waitFor({ timeout: 40000 }).catch(() => {}),
+    codeBox.waitFor({ timeout: 40000 }).catch(() => {}),
     error.waitFor({ timeout: 40000 }).catch(() => {})
   ])
   if (await error.isVisible().catch(() => false)) {
     // Quien canjea la cita es el IFRAME de identidad, no la consola: si falla aquí,
     // el problema está del otro lado del `postMessage`.
-    assert.fail('el canje falló en el iframe de identidad: ' + (await error.innerText()).trim())
+    assert.fail('redeeming failed in the identity iframe: ' + (await error.innerText()).trim())
   }
-  const code = (await caja.innerText()).trim()
-  assert.match(code, /^\d{6}$/, 'seis dígitos para teclear en la bóveda')
+  const code = (await codeBox.innerText()).trim()
+  assert.match(code, /^\d{6}$/, 'six digits to type into the vault')
 
   // Y el emparejamiento se cierra de verdad: la bóveda lo admite en su acta.
-  const antes = vault.acta().members.length
+  const before = vault.acta().members.length
   await vault.waitPending()
   vault.approve(code)
   await page.waitForFunction(
     () => !document.querySelector('[data-testid="pair-code"]'),
     null, { timeout: 30000 }
   )
-  assert.equal(vault.acta().members.length, antes + 1, 'la bóveda lo admitió en su acta')
+  assert.equal(vault.acta().members.length, before + 1, 'the vault admitted it into its record')
   await page.close()
 })
 
 // ---------- arranque ----------
 
 console.log('\nSMOKE · the SHORT invite in the browser console\n')
-if (!fs.existsSync(path.join(CONSOLA, 'index.html'))) {
-  console.error(`Missing the console build in ${CONSOLA}.\n`)
+if (!fs.existsSync(path.join(CONSOLE, 'index.html'))) {
+  console.error(`Missing the console build in ${CONSOLE}.\n`)
   process.exit(2)
 }
 try {
   const { chromium } = await import('playwright')
-  proxy = await startProxyConNodo()
-  vault = await startVault({ proxyUrl: proxy.url, name: 'boveda', log })
-  webConsola = await serveStatic(CONSOLA, { spa: true })
+  proxy = await startProxyWithNode()
+  vault = await startVault({ proxyUrl: proxy.url, name: 'vault', log })
+  webConsole = await serveStatic(CONSOLE, { spa: true })
   webIframe = await serveStatic(IFRAME)
   console.log(`  proxy     ${proxy.url}  (with node identity: issues appointments)`)
-  console.log(`  consola   ${webConsola.url}/vault   ← ${CONSOLA}`)
+  console.log(`  console   ${webConsole.url}/vault   ← ${CONSOLE}`)
   console.log(`  identity ${webIframe.url}  (the iframe, on another origin)\n`)
 
-  navegador = await chromium.launch({ headless: !VERBOSE })
-  contexto = await navegador.newContext({ locale: 'es-ES' })
+  browser = await chromium.launch({ headless: !VERBOSE })
+  context = await browser.newContext({ locale: 'es-ES' })
 
   const ok = await runScenarios()
-  await contexto?.close(); await navegador?.close()
+  await context?.close(); await browser?.close()
   try { proxy?.child?.kill('SIGKILL') } catch (_) {}
   await teardown()
   process.exit(ok ? 0 : 1)
 } catch (e) {
   console.error('\ncould not set up the scenario:', e?.stack || e)
-  try { await contexto?.close(); await navegador?.close() } catch (_) {}
+  try { await context?.close(); await browser?.close() } catch (_) {}
   try { proxy?.child?.kill('SIGKILL') } catch (_) {}
   await teardown()
   process.exit(1)

@@ -21,9 +21,9 @@ import os from 'node:os'
 import path from 'node:path'
 
 export const ECO = path.resolve(new URL('../../..', import.meta.url).pathname)
-const IMAGEN = process.env.SMOKE_IMAGE || 'node:22-bookworm-slim'
+const IMAGE = process.env.SMOKE_IMAGE || 'node:22-bookworm-slim'
 
-const cajas = []
+const boxes = []
 
 /** ¿Hay Docker usable? (existe y su daemon responde) */
 export function dockerAvailable () {
@@ -32,8 +32,8 @@ export function dockerAvailable () {
 }
 
 export function pickEngine () {
-  const forzado = process.env.SMOKE_BACKEND
-  if (forzado) return forzado
+  const forced = process.env.SMOKE_BACKEND
+  if (forced) return forced
   return dockerAvailable() ? 'docker' : 'local'
 }
 
@@ -41,100 +41,100 @@ const sh = (cmd, args, opts = {}) => spawnSync(cmd, args, { encoding: 'utf8', ..
 
 /**
  * Crea una instancia efímera.
- * @returns {{nombre, motor, exec, lanzar, escribir, leer, destruir}}
+ * @returns {{name, engine, id, home, exec, launch, write, read, destroy}}
  */
-export function createBox (nombre, { motor = pickEngine() } = {}) {
-  const caja = motor === 'docker' ? cajaDocker(nombre) : cajaLocal(nombre)
-  cajas.push(caja)
-  return caja
+export function createBox (name, { engine = pickEngine() } = {}) {
+  const box = engine === 'docker' ? dockerBox(name) : localBox(name)
+  boxes.push(box)
+  return box
 }
 
-function cajaDocker (nombre) {
-  const id = `smoke-${nombre}-${Date.now().toString(36)}`
+function dockerBox (name) {
+  const id = `smoke-${name}-${Date.now().toString(36)}`
   // `--network host` para llegar al proxy del host sin inventar DNS; el ecosistema va
   // montado de solo lectura, así que un dispositivo no puede tocar el código ni los datos
   // de otro; `/data` es su disco, y muere con el contenedor.
   const r = sh('docker', ['run', '-d', '--rm', '--network', 'host',
     '-v', `${ECO}:/eco:ro`, '--tmpfs', '/data:exec,mode=0700',
-    '-w', '/eco', '--name', id, IMAGEN, 'sleep', 'infinity'])
-  if (r.status !== 0) throw new Error(`could not create box ${nombre}: ${r.stderr || r.stdout}`)
+    '-w', '/eco', '--name', id, IMAGE, 'sleep', 'infinity'])
+  if (r.status !== 0) throw new Error(`could not create box ${name}: ${r.stderr || r.stdout}`)
 
   return {
-    nombre, motor: 'docker', id, home: '/data',
+    name, engine: 'docker', id, home: '/data',
     /** Ejecuta y espera. Devuelve `{ status, stdout, stderr }`. */
     exec (cmd, { env = {} } = {}) {
       const e = Object.entries({ HOME: '/data', ...env }).flatMap(([k, v]) => ['-e', `${k}=${v}`])
       return sh('docker', ['exec', ...e, id, 'sh', '-lc', cmd])
     },
     /** Lanza algo en segundo plano y llama a `onLinea` por cada línea de salida. */
-    lanzar (cmd, { env = {}, onLinea = () => {} } = {}) {
+    launch (cmd, { env = {}, onLine = () => {} } = {}) {
       const e = Object.entries({ HOME: '/data', ...env }).flatMap(([k, v]) => ['-e', `${k}=${v}`])
       const p = spawn('docker', ['exec', ...e, id, 'sh', '-lc', cmd], { stdio: ['ignore', 'pipe', 'pipe'] })
       let buf = ''
-      const alimentar = (b) => {
+      const feed = (b) => {
         buf += String(b)
         let i
-        while ((i = buf.indexOf('\n')) >= 0) { onLinea(buf.slice(0, i)); buf = buf.slice(i + 1) }
+        while ((i = buf.indexOf('\n')) >= 0) { onLine(buf.slice(0, i)); buf = buf.slice(i + 1) }
       }
-      p.stdout.on('data', alimentar)
-      p.stderr.on('data', alimentar)
+      p.stdout.on('data', feed)
+      p.stderr.on('data', feed)
       return p
     },
     /**
      * Escribe un archivo dentro de la caja. Se hace por `stdin` y no con `docker cp` porque
      * el disco de la caja es un tmpfs y `cp` no siempre aterriza ahí.
      */
-    escribir (rutaEnCaja, contenido) {
-      const dir = path.posix.dirname(rutaEnCaja)
-      const r = spawnSync('docker', ['exec', '-i', id, 'sh', '-lc', `mkdir -p ${dir} && cat > ${rutaEnCaja}`],
-        { input: contenido, encoding: 'utf8' })
+    write (boxPath, content) {
+      const dir = path.posix.dirname(boxPath)
+      const r = spawnSync('docker', ['exec', '-i', id, 'sh', '-lc', `mkdir -p ${dir} && cat > ${boxPath}`],
+        { input: content, encoding: 'utf8' })
       if (r.status !== 0) throw new Error('could not write into the box: ' + (r.stderr || ''))
     },
-    leer (rutaEnCaja) {
-      const r = sh('docker', ['exec', id, 'cat', rutaEnCaja])
+    read (boxPath) {
+      const r = sh('docker', ['exec', id, 'cat', boxPath])
       return r.status === 0 ? r.stdout : null
     },
-    destruir () { sh('docker', ['rm', '-f', id], { stdio: 'ignore' }) }
+    destroy () { sh('docker', ['rm', '-f', id], { stdio: 'ignore' }) }
   }
 }
 
-function cajaLocal (nombre) {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), `smoke-${nombre}-`))
+function localBox (name) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), `smoke-${name}-`))
   const envBase = { HOME: home, PATH: process.env.PATH }
   // Los guiones están escritos con las rutas de la caja (`/eco` y `/data`) para que sean
   // los mismos en los dos motores. Aquí se traducen a rutas reales del host.
   const tr = (t) => String(t).split('/eco').join(ECO).split('/data').join(home)
   const trEnv = (env) => Object.fromEntries(Object.entries(env).map(([k, v]) => [k, tr(v)]))
   return {
-    nombre, motor: 'local', id: home, home,
+    name, engine: 'local', id: home, home,
     exec (cmd, { env = {} } = {}) {
       return sh('sh', ['-lc', tr(cmd)], { cwd: ECO, env: { ...envBase, ...trEnv(env) } })
     },
-    lanzar (cmd, { env = {}, onLinea = () => {} } = {}) {
+    launch (cmd, { env = {}, onLine = () => {} } = {}) {
       const p = spawn('sh', ['-lc', tr(cmd)], { cwd: ECO, env: { ...envBase, ...trEnv(env) }, stdio: ['ignore', 'pipe', 'pipe'] })
       let buf = ''
-      const alimentar = (b) => {
+      const feed = (b) => {
         buf += String(b)
         let i
-        while ((i = buf.indexOf('\n')) >= 0) { onLinea(buf.slice(0, i)); buf = buf.slice(i + 1) }
+        while ((i = buf.indexOf('\n')) >= 0) { onLine(buf.slice(0, i)); buf = buf.slice(i + 1) }
       }
-      p.stdout.on('data', alimentar)
-      p.stderr.on('data', alimentar)
+      p.stdout.on('data', feed)
+      p.stderr.on('data', feed)
       return p
     },
-    escribir (ruta, contenido) {
-      const dest = tr(ruta)
+    write (filePath, content) {
+      const dest = tr(filePath)
       fs.mkdirSync(path.dirname(dest), { recursive: true })
-      fs.writeFileSync(dest, tr(contenido))
+      fs.writeFileSync(dest, tr(content))
     },
-    leer (ruta) {
-      try { return fs.readFileSync(tr(ruta), 'utf8') } catch { return null }
+    read (filePath) {
+      try { return fs.readFileSync(tr(filePath), 'utf8') } catch { return null }
     },
-    destruir () { try { fs.rmSync(home, { recursive: true, force: true }) } catch (_) {} }
+    destroy () { try { fs.rmSync(home, { recursive: true, force: true }) } catch (_) {} }
   }
 }
 
 /** Destruye todas las cajas creadas. */
 export function destroyBoxes () {
-  for (const c of cajas.splice(0)) { try { c.destruir() } catch (_) {} }
+  for (const c of boxes.splice(0)) { try { c.destroy() } catch (_) {} }
 }

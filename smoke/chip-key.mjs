@@ -1,5 +1,5 @@
 /**
- * smoke:llave-del-chip — EL TELÉFONO ES UN SOLO APARATO: su llave del chip tiene perfil Y aprueba.
+ * smoke:chip-key — EL TELÉFONO ES UN SOLO APARATO: su llave del chip tiene perfil Y aprueba.
  *
  * El caso del dueño (2026-09-25): en la app de Android la pestaña Perfil salía vacía, porque
  * la llave nativa (la que aprueba) y la identidad del WebView eran dos llaves distintas, y
@@ -12,7 +12,7 @@
  *      a la app (`save`, lo que usa la pantalla nativa de Pedidos);
  *   3. en la bóveda es UN aparato nuevo, y con `+aprueba` esa misma llave aprueba.
  *
- *   npm run smoke:llave-del-chip [-- --verbose]
+ *   npm run smoke:chip-key [-- --verbose]
  */
 import assert from 'node:assert/strict'
 import { scenario, runScenarios, startProxy, teardown } from './lib/harness.js'
@@ -22,71 +22,66 @@ import { keyLabel } from '../../dotrino-identity/vault/keyid.js'
 
 const VERBOSE = process.argv.includes('--verbose')
 const log = (m) => { if (VERBOSE) console.log(m) }
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-const BINARIO = '/eco/dotrino-vault/dist/dotrino-vaultd'
+import { waitFor } from './lib/wait.js'
+const BINARY = '/eco/dotrino-vault/dist/dotrino-vaultd'
 const ENV = { DOTRINO_VAULT_DIR: '/data/vault' }
-const FOTO = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+const PHOTO = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 
 let proxy = null
-let boveda = null
+let vault = null
 
-async function esperar (fn, { timeoutMs = 30000, que = 'la condición' } = {}) {
-  const t = Date.now() + timeoutMs
-  while (Date.now() < t) { const v = await fn(); if (v) return v; await sleep(250) }
-  throw new Error('timed out waiting for ' + que)
-}
 const ctl = (args) => {
-  const r = boveda.exec(`${BINARIO} --ctl ${args}`, { env: ENV })
+  const r = vault.exec(`${BINARY} --ctl ${args}`, { env: ENV })
   const out = ((r.stdout || '') + (r.stderr || '')).replace(/\x1b\[[0-9;]*m/g, '')
   log(`[ctl ${args}] ${out.trim()}`)
   return out
 }
 /** Una invitación nueva de la bóveda, como la que enseña `dotrino-vault pair`. */
-async function invitacion (tag) {
-  const lineas = []
-  boveda.lanzar(`${BINARIO} --ctl pair`, { env: ENV, onLinea: (l) => { lineas.push(l.trim()); log(`[${tag}] ` + l) } })
-  return esperar(() => { for (const l of lineas) { const o = l.length > 20 && parseInvite(l); if (o?.sn) return o } return null }, { que: 'la invitación' })
+async function invitation (tag) {
+  const lines = []
+  vault.launch(`${BINARY} --ctl pair`, { env: ENV, onLine: (l) => { lines.push(l.trim()); log(`[${tag}] ` + l) } })
+  return waitFor(() => { for (const l of lines) { const o = l.length > 20 && parseInvite(l); if (o?.sn) return o } return null }, { what: 'the invitation' })
 }
 
-scenario('la bóveda arranca y un aparato normal pone el perfil de la cuenta', async () => {
+scenario('the vault starts and a normal device sets the account profile', async () => {
   proxy = await startProxy()
-  boveda = createBox('boveda-chip')
-  if (boveda.motor === 'docker') boveda.exec('ldconfig -p | grep -q libatomic || (apt-get update -qq && apt-get install -y -qq libatomic1) >/dev/null 2>&1')
-  boveda.lanzar(BINARIO, { env: { ...ENV, PROXY_URL: proxy.url }, onLinea: (l) => log('[vault] ' + l) })
-  await esperar(() => /corriendo/.test(ctl('status')), { que: 'que la bóveda arranque' })
-  const qr = await invitacion('pair-pc')
+  vault = createBox('vault-chip')
+  if (vault.engine === 'docker') vault.exec('ldconfig -p | grep -q libatomic || (apt-get update -qq && apt-get install -y -qq libatomic1) >/dev/null 2>&1')
+  vault.launch(BINARY, { env: { ...ENV, PROXY_URL: proxy.url }, onLine: (l) => log('[vault] ' + l) })
+  await waitFor(() => /corriendo/.test(ctl('status')), { what: 'the vault to start' })
+  const qr = await invitation('pair-pc')
   const pc = createBox('pc-chip')
-  let empuje = null
-  pc.lanzar(`node --input-type=module -e "$GUION"`, {
+  let pushState = null
+  pc.launch(`node --input-type=module -e "$SCRIPT"`, {
     env: {
       QR: JSON.stringify(qr),
-      GUION: `
+      SCRIPT: `
         import { Identity } from '/eco/dotrino-identity/src/node.js'
         const id = await Identity.connect({ dir: '/data/pc' })
         id.onVault((e) => { if (e.phase === 'challenge') console.log('CODE:' + e.code) })
         await id.enrollDevice(JSON.parse(process.env.QR), { label: 'pc', join: 'new' })
-        await id.updateMe({ nickname: 'Santiago', avatar: '${FOTO}', email: 'santi@example.com' })
-        for (let i = 0; i < 60; i++) { const s = await id.profilePushState(); if (s && s.ok !== null) { console.log('EMPUJE:' + JSON.stringify(s)); break } await new Promise((r) => setTimeout(r, 500)) }
+        await id.updateMe({ nickname: 'Santiago', avatar: '${PHOTO}', email: 'santi@example.com' })
+        for (let i = 0; i < 60; i++) { const s = await id.profilePushState(); if (s && s.ok !== null) { console.log('PUSH:' + JSON.stringify(s)); break } await new Promise((r) => setTimeout(r, 500)) }
         setTimeout(() => process.exit(0), 300)
       `
     },
-    onLinea: (l) => {
+    onLine: (l) => {
       log('[pc] ' + l)
       const m = /CODE:(\d+)/.exec(l); if (m) ctl('approve ' + m[1])
-      if (l.startsWith('EMPUJE:')) empuje = JSON.parse(l.slice(7))
+      if (l.startsWith('PUSH:')) pushState = JSON.parse(l.slice(5))
     }
   })
-  await esperar(() => empuje, { timeoutMs: 60000, que: 'que el PC suba el perfil' })
-  assert.equal(empuje.ok, true, 'el perfil llegó a la bóveda: ' + JSON.stringify(empuje))
+  await waitFor(() => pushState, { timeoutMs: 60000, what: 'the PC to upload the profile' })
+  assert.equal(pushState.ok, true, 'the profile reached the vault: ' + JSON.stringify(pushState))
 })
 
 const tel = {}
-scenario('el teléfono se empareja con la llave del chip: sin privadas en IndexedDB, y la app recibe la cuenta', async () => {
-  const qr = await invitacion('pair-tel')
-  const caja = createBox('phone-chip')
-  caja.lanzar('node /eco/dotrino-test/smoke/boxes/phone-chip.mjs', {
+scenario('the phone pairs with the chip key: no private keys in IndexedDB, and the app receives the account', async () => {
+  const qr = await invitation('pair-tel')
+  const box = createBox('phone-chip')
+  box.launch('node /eco/dotrino-test/smoke/boxes/phone-chip.mjs', {
     env: { QR: JSON.stringify(qr) },
-    onLinea: (l) => {
+    onLine: (l) => {
       log('[phone] ' + l)
       const m = /^(\w+):(.*)$/.exec(l.trim()); if (!m) return
       let v; try { v = JSON.parse(m[2]) } catch (_) { return }
@@ -94,29 +89,29 @@ scenario('el teléfono se empareja con la llave del chip: sin privadas en Indexe
       tel[m[1]] = v
     }
   })
-  await esperar(() => tel.EMPAREJADO, { timeoutMs: 60000, que: 'que el teléfono se empareje' })
-  assert.equal(tel.PRIVADAS_EN_IDB, 0, 'ninguna llave privada en el almacén del WebView')
-  await esperar(() => tel.GUARDADA, { que: 'que la app reciba la cuenta para Pedidos' })
-  assert.equal(tel.GUARDADA.cert, true, 'con su papel')
-  assert.equal(tel.GUARDADA.vault, true, 'y la bóveda a la que pertenece')
+  await waitFor(() => tel.PAIRED, { timeoutMs: 60000, what: 'the phone to pair' })
+  assert.equal(tel.PRIVATE_KEYS_IN_IDB, 0, 'no private key in the WebView store')
+  await waitFor(() => tel.SAVED, { what: 'the app to receive the account for Approvals' })
+  assert.equal(tel.SAVED.cert, true, 'with its certificate')
+  assert.equal(tel.SAVED.vault, true, 'and the vault it belongs to')
 })
 
-scenario('el teléfono BAJA el perfil de la cuenta (lo que salía vacío)', async () => {
-  await esperar(() => tel.ME, { timeoutMs: 30000, que: 'que el teléfono diga qué perfil tiene' })
+scenario('the phone DOWNLOADS the account profile (what used to come out empty)', async () => {
+  await waitFor(() => tel.ME, { what: 'the phone to report its profile' })
   assert.equal(tel.ME.nickname, 'Santiago', JSON.stringify(tel.ME))
-  assert.equal(tel.ME.avatar, true, 'la foto: ' + JSON.stringify(tel.ME))
-  assert.equal(tel.ME.email, 'santi@example.com', 'un dato: ' + JSON.stringify(tel.ME))
+  assert.equal(tel.ME.avatar, true, 'the photo: ' + JSON.stringify(tel.ME))
+  assert.equal(tel.ME.email, 'santi@example.com', 'a field: ' + JSON.stringify(tel.ME))
 })
 
-scenario('en la bóveda es UN aparato, y con +aprueba la misma llave aprueba', async () => {
+scenario('in the vault it is ONE device, and with +aprueba the same key approves', async () => {
   // Unirse a la cuenta crea un perfil NUEVO en el teléfono, con su propia llave del chip.
-  const id = tel.EMPAREJADO.deviceId
-  assert.equal(await keyLabel(tel.EMPAREJADO.pub), id, 'el aparato de la bóveda ES la llave del chip')
+  const id = tel.PAIRED.deviceId
+  assert.equal(await keyLabel(tel.PAIRED.pub), id, 'the vault device IS the chip key')
   const members = ctl('members')
-  assert.equal(members.split('\n').filter((l) => l.includes(id)).length, 1, `el teléfono (${id}) es un solo miembro:\n` + members)
+  assert.equal(members.split('\n').filter((l) => l.includes(id)).length, 1, `the phone (${id}) is a single member:\n` + members)
   ctl(`caps ${id} +aprueba`)
-  await esperar(() => tel.APRUEBA, { timeoutMs: 60000, que: 'que el teléfono pueda listar los pedidos' })
-  assert.ok(Number.isInteger(tel.APRUEBA.items))
+  await waitFor(() => tel.APPROVES, { timeoutMs: 60000, what: 'the phone to be able to list the requests' })
+  assert.ok(Number.isInteger(tel.APPROVES.items))
 })
 
 const ok = await runScenarios()

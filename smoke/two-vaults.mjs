@@ -11,9 +11,9 @@
  * pierda permanentemente un vault»*.
  *
  * Tres cajas, tres máquinas:
- *   · `boveda-a` — la bóveda que tiene la cuenta. Binario real + su CLI.
- *   · `boveda-b` — la otra bóveda. Entra con `join` y recibe `+sella`.
- *   · `aparato`  — un teléfono cualquiera, que entra por B para demostrar que B manda.
+ *   · `vault-a` — la bóveda que tiene la cuenta. Binario real + su CLI.
+ *   · `vault-b` — la otra bóveda. Entra con `join` y recibe `+sella`.
+ *   · `device`   — un teléfono cualquiera, que entra por B para demostrar que B manda.
  *
  *   node smoke/two-vaults.mjs            (Docker si lo hay; si no, cajas locales)
  *   SMOKE_BACKEND=local node smoke/two-vaults.mjs
@@ -42,176 +42,166 @@ import { scenario, runScenarios, startProxy, teardown, ROOT } from './lib/harnes
 import { pubkeyId } from '../../dotrino-identity/vault/capabilities.js'
 import { createBox, destroyBoxes, pickEngine, ECO } from './lib/box.js'
 import { parseInvite } from '../../dotrino-vault/lib/src/invite.js'
+import { waitFor } from './lib/wait.js'
 
 const VERBOSE = process.argv.includes('--verbose')
 const log = (m) => { if (VERBOSE) console.log(m) }
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-const BINARIO = '/eco/dotrino-vault/dist/dotrino-vaultd'
+const BINARY = '/eco/dotrino-vault/dist/dotrino-vaultd'
 const ENV = { DOTRINO_VAULT_DIR: '/data/vault' }
 
 let proxy = null
-const bovedas = {}
+const vaults = {}
 
-async function esperar (fn, { timeoutMs = 30000, que = 'la condición' } = {}) {
-  const t = Date.now() + timeoutMs
-  while (Date.now() < t) {
-    const v = await fn()
-    if (v) return v
-    await sleep(200)
-  }
-  throw new Error('timed out waiting for ' + que)
-}
-
-async function idDe (pub) {
+async function idOf (pub) {
   const h = (await pubkeyId(pub)).slice(0, 8).toUpperCase()
   return h.slice(0, 4) + '-' + h.slice(4)
 }
 
 /** Una bóveda de verdad: el binario que se instala un usuario, en su propia caja. */
-async function levantar (nombre) {
-  const caja = createBox(nombre)
+async function startVaultBox (name) {
+  const box = createBox(name)
   // El binario trae Node dentro pero espera `libatomic1` del sistema (lo destapó el smoke
   // de dispositivos en un Debian limpio; por eso el `.deb` la declara).
-  if (caja.motor === 'docker') {
-    caja.exec('ldconfig -p | grep -q libatomic || (apt-get update -qq && apt-get install -y -qq libatomic1) >/dev/null 2>&1')
+  if (box.engine === 'docker') {
+    box.exec('ldconfig -p | grep -q libatomic || (apt-get update -qq && apt-get install -y -qq libatomic1) >/dev/null 2>&1')
   }
-  const salida = []
-  caja.lanzar(BINARIO, {
+  const output = []
+  box.launch(BINARY, {
     env: { ...ENV, PROXY_URL: proxy.url },
-    onLinea: (l) => { salida.push(l); log(`[${nombre}] ` + l) }
+    onLine: (l) => { output.push(l); log(`[${name}] ` + l) }
   })
-  await esperar(() => salida.some((l) => l.includes('servicio listo')), { que: `que arranque ${nombre}` })
-    .catch(() => { throw new Error(`${nombre} did not start:\n` + salida.join('\n')) })
+  await waitFor(() => output.some((l) => l.includes('servicio listo')), { what: `${name} to start` })
+    .catch(() => { throw new Error(`${name} did not start:\n` + output.join('\n')) })
   const b = {
-    caja,
-    salida,
-    ctl: (cmd) => caja.exec(`${BINARIO} --ctl ${cmd}`, { env: ENV }),
+    box,
+    output,
+    ctl: (cmd) => box.exec(`${BINARY} --ctl ${cmd}`, { env: ENV }),
     /** Lanza un `--ctl` que no termina (pair, join) y recoge sus líneas. */
-    ctlVivo (cmd) {
-      const lineas = []
-      caja.lanzar(`${BINARIO} --ctl ${cmd}`, { env: ENV, onLinea: (l) => { lineas.push(l.trim()); log(`[${nombre} ${cmd.split(' ')[0]}] ` + l) } })
-      return lineas
+    ctlLive (cmd) {
+      const lines = []
+      box.launch(`${BINARY} --ctl ${cmd}`, { env: ENV, onLine: (l) => { lines.push(l.trim()); log(`[${name} ${cmd.split(' ')[0]}] ` + l) } })
+      return lines
     }
   }
-  bovedas[nombre] = b
+  vaults[name] = b
   return b
 }
 
 /** `pair` en una bóveda: devuelve la invitación ya parseada. */
-async function invitacionDe (b) {
-  const lineas = b.ctlVivo('pair')
-  return esperar(() => {
-    for (const l of lineas) {
+async function inviteOf (b) {
+  const lines = b.ctlLive('pair')
+  return waitFor(() => {
+    for (const l of lines) {
       if (!l || l.length < 20) continue
       const o = parseInvite(l)
       if (o?.sn) return o
     }
     return null
-  }, { que: 'la invitación que imprime pair' })
+  }, { what: 'the invite printed by pair' })
 }
 
 /** El código de 6 que hay que tipear al otro lado, de una salida cualquiera. */
-const codigoEn = (lineas) => esperar(() => {
-  for (const l of lineas) {
+const codeIn = (lines) => waitFor(() => {
+  for (const l of lines) {
     const m = /\b(\d{6})\b/.exec(l)
     if (m) return m[1]
   }
   return null
-}, { que: 'el código de confirmación' })
+}, { what: 'the confirmation code' })
 
 let A = null
 let B = null
 let idB = null
 
-const miembrosA = () => A.ctl('members').stdout || ''
+const membersOfA = () => A.ctl('members').stdout || ''
 /** Los permisos que el acta le reconoce a un miembro (su línea y la de debajo). */
-const permisosDe = (id, salida = miembrosA()) => {
-  const l = salida.split('\n')
+const capsOf = (id, output = membersOfA()) => {
+  const l = output.split('\n')
   const i = l.findIndex((x) => x.includes(id))
   return i >= 0 ? (l[i] + ' ' + (l[i + 1] || '')) : ''
 }
 
-scenario('B entra en la cuenta de A CON SU PROPIA LLAVE', async () => {
-  A = await levantar('boveda-a')
-  B = await levantar('boveda-b')
+scenario('B joins A\'s account WITH ITS OWN KEY', async () => {
+  A = await startVaultBox('vault-a')
+  B = await startVaultBox('vault-b')
 
-  const invitacion = await invitacionDe(A)
-  const lineasJoin = B.ctlVivo(`join '${JSON.stringify(invitacion).replace(/'/g, "'\\''")}'`)
-  const codigo = await codigoEn(lineasJoin)
-  log('[test] code shown by B: ' + codigo)
+  const invite = await inviteOf(A)
+  const joinLines = B.ctlLive(`join '${JSON.stringify(invite).replace(/'/g, "'\\''")}'`)
+  const code = await codeIn(joinLines)
+  log('[test] code shown by B: ' + code)
 
-  A.ctl(`approve ${codigo}`)
-  await esperar(() => lineasJoin.some((l) => /ya es miembro|acta #/.test(l)), { que: 'que B confirme que entró' })
+  A.ctl(`approve ${code}`)
+  await waitFor(() => joinLines.some((l) => /ya es miembro|acta #/.test(l)), { what: 'B to confirm it joined' })
 
-  const acta = await esperar(() => {
-    const a = miembrosA()
+  const record = await waitFor(() => {
+    const a = membersOfA()
     return [...a.matchAll(/\b([0-9A-F]{4}-[0-9A-F]{4})\b/g)].length >= 2 ? a : null
-  }, { que: 'que el acta de A liste a B' })
-  log('[test] A\'s record after the join:\n' + acta)
+  }, { what: 'A\'s record to list B' })
+  log('[test] A\'s record after the join:\n' + record)
 
-  const ids = [...acta.matchAll(/\b([0-9A-F]{4}-[0-9A-F]{4})\b/g)].map((m) => m[1])
+  const ids = [...record.matchAll(/\b([0-9A-F]{4}-[0-9A-F]{4})\b/g)].map((m) => m[1])
   idB = ids[ids.length - 1]
-  assert.ok(idB, 'el acta de A tiene que listar a B')
+  assert.ok(idB, 'A\'s record must list B')
 })
 
-scenario('B NO nace pudiendo sellar: es un permiso y se concede a mano', async () => {
-  assert.ok(!/sella|sealer/i.test(permisosDe(idB)),
-    'como «administra», sellar no se empareja — se concede desde el PC')
+scenario('B is NOT born able to seal: it is a permission granted by hand', async () => {
+  assert.ok(!/sella|sealer/i.test(capsOf(idB)),
+    'like «administra», sealing is not paired — it is granted from the PC')
 })
 
-scenario('el dueño le DA el permiso de sellar, y se lo puede QUITAR', async () => {
+scenario('the owner GRANTS the seal permission, and can REVOKE it', async () => {
   A.ctl(`caps ${idB} +sella`)
-  await esperar(() => /sella|sealer/i.test(permisosDe(idB)), { que: 'que el acta le reconozca sellar' })
+  await waitFor(() => /sella|sealer/i.test(capsOf(idB)), { what: 'the record to grant it sealing' })
 
   A.ctl(`caps ${idB} -sella`)
-  await esperar(() => !/sella|sealer/i.test(permisosDe(idB)), { que: 'que el permiso se retire' })
+  await waitFor(() => !/sella|sealer/i.test(capsOf(idB)), { what: 'the permission to be removed' })
 
   A.ctl(`caps ${idB} +sella`)
-  await esperar(() => /sella|sealer/i.test(permisosDe(idB)), { que: 'que se pueda volver a dar' })
+  await waitFor(() => /sella|sealer/i.test(capsOf(idB)), { what: 'the permission to be granted again' })
 })
 
 /**
  * EL PASO CLAVE, y el desastre que esto viene a cubrir: A no interviene en ningún momento.
  */
-scenario('con el permiso, B admite un aparato ELLA SOLA y A adopta ese acta', async () => {
-  const telefono = createBox('aparato')
-  const invitacionB = await invitacionDe(B)
-  const lineas = []
-  telefono.escribir('/data/enrolar.mjs', `
+scenario('with the permission, B admits a device ON ITS OWN and A adopts that record', async () => {
+  const phone = createBox('device')
+  const inviteB = await inviteOf(B)
+  const lines = []
+  phone.write('/data/enroll.mjs', `
     import { enroll } from '/eco/dotrino-vault/src/client.js'
     const qr = JSON.parse(process.env.QR)
-    const r = await enroll({ qr, label: 'teléfono', dir: '/data/dev', onChallenge: (c) => console.log('CODE:' + c.code) })
+    const r = await enroll({ qr, label: 'phone', dir: '/data/dev', onChallenge: (c) => console.log('CODE:' + c.code) })
     console.log('OK:' + JSON.stringify({ pub: r.device.publickey }))
   `)
-  telefono.lanzar('node /data/enrolar.mjs', {
-    env: { QR: JSON.stringify(invitacionB) },
-    onLinea: (l) => { lineas.push(l.trim()); log('[device] ' + l) }
+  phone.launch('node /data/enroll.mjs', {
+    env: { QR: JSON.stringify(inviteB) },
+    onLine: (l) => { lines.push(l.trim()); log('[device] ' + l) }
   })
-  const codigoTel = await esperar(() => {
-    const l = lineas.find((x) => x.startsWith('CODE:'))
+  const phoneCode = await waitFor(() => {
+    const l = lines.find((x) => x.startsWith('CODE:'))
     return l ? l.slice(5) : null
-  }, { que: 'el código del teléfono' })
+  }, { what: 'the phone\'s code' })
 
-  B.ctl(`approve ${codigoTel}`)
-  const ok = await esperar(() => lineas.find((l) => l.startsWith('OK:')), {
-    que: 'que el teléfono acabe de enrolarse por B (sin que A intervenga)'
+  B.ctl(`approve ${phoneCode}`)
+  const ok = await waitFor(() => lines.find((l) => l.startsWith('OK:')), {
+    what: 'the phone to finish enrolling through B (without A stepping in)'
   })
-  const idTel = await idDe(JSON.parse(ok.slice(3)).pub)
-  log('[test] the phone joined through B: ' + idTel)
+  const phoneId = await idOf(JSON.parse(ok.slice(3)).pub)
+  log('[test] the phone joined through B: ' + phoneId)
 
   // Lo que cierra el círculo: no son dos cuentas paralelas, es UNA. Lo que sella B lo
   // adopta A por las reglas de siempre (§2.4.1), sin que nadie toque el PC de A.
-  await esperar(() => miembrosA().includes(idTel), {
+  await waitFor(() => membersOfA().includes(phoneId), {
     timeoutMs: 45000,
-    que: 'que A adopte el acta que selló B'
+    what: 'A to adopt the record sealed by B'
   })
 })
 
 // ---------- arranque ----------
 
-const motor = pickEngine()
-console.log(`\nSMOKE · two vaults on the same account (engine: ${motor})\n`)
+const engine = pickEngine()
+console.log(`\nSMOKE · two vaults on the same account (engine: ${engine})\n`)
 if (!fs.existsSync(path.join(ROOT, 'dotrino-vault/dist/dotrino-vaultd'))) {
   console.error('Missing the binary. Build it with:  cd dotrino-vault && bash packaging/build.sh\n')
   process.exit(2)

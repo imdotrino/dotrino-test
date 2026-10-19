@@ -26,7 +26,7 @@ import { scenario, runScenarios, startProxy, startVault, teardown, tmpDir, ROOT,
 
 const VERBOSE = process.argv.includes('--verbose')
 const log = (m) => { if (VERBOSE) console.log(m) }
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+import { sleep } from './lib/wait.js'
 
 // El cliente REAL de dispositivo: el aparato que se empareja no es una imitación.
 const { enroll, requestSign, verifyRevoke } = await import(path.join(ROOT, 'dotrino-vault/src/client.js'))
@@ -49,7 +49,7 @@ let tui = null
  * crudo y no lee ni una tecla. El `stty` de dentro le pone tamaño al terminal (si no,
  * hereda 0×0 y la TUI dibuja «terminal muy pequeño»).
  */
-function abrirTui ({ dir, lang = 'es', cols = 120, rows = 60 } = {}) {
+function openTui ({ dir, lang = 'es', cols = 120, rows = 60 } = {}) {
   const cmd = `stty rows ${rows} cols ${cols} 2>/dev/null; exec node bin/dotrino-vault-tui.js`
   const p = spawn('script', ['-q', '-e', '-c', cmd, '/dev/null'], {
     cwd: VAULT_DIR,
@@ -57,38 +57,38 @@ function abrirTui ({ dir, lang = 'es', cols = 120, rows = 60 } = {}) {
     stdio: ['pipe', 'pipe', 'pipe']
   })
   let buf = ''
-  let desde = 0
+  let from = 0
   p.stdout.on('data', (b) => { buf += String(b) })
   p.stderr.on('data', (b) => { buf += String(b) })
 
   // La TUI dibuja posicionando el cursor al principio de cada fila, así que ESO es el
   // salto de línea; el resto de escapes (color, borrado) se tira.
-  const limpiar = (s) => s
+  const clean = (s) => s
     .replace(/\x1b\[[0-9]+;1H/g, '\n')
     .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
     .replace(/\r/g, '')
 
   const api = {
-    proceso: p,
+    proc: p,
     /** Todo lo dibujado desde la última tecla. */
-    pantalla: () => limpiar(buf.slice(desde)),
-    todo: () => limpiar(buf),
-    /** Teclea. A partir de aquí, `pantalla()` y `esperar()` solo miran lo nuevo. */
-    teclas (s) { desde = buf.length; p.stdin.write(s); return api },
+    screen: () => clean(buf.slice(from)),
+    all: () => clean(buf),
+    /** Teclea. A partir de aquí, `screen()` y `waitFor()` solo miran lo nuevo. */
+    keys (s) { from = buf.length; p.stdin.write(s); return api },
     /** Espera a que lo dibujado tras la última tecla diga esto. Devuelve la pantalla. */
-    async esperar (re, ms = 20000) {
-      const hasta = Date.now() + ms
-      while (Date.now() < hasta) {
-        const v = api.pantalla()
+    async waitFor (re, ms = 20000) {
+      const until = Date.now() + ms
+      while (Date.now() < until) {
+        const v = api.screen()
         if (re.test(v)) return v
         await sleep(120)
       }
-      const visto = api.pantalla().split('\n').filter((l) => l.trim()).slice(-12).join('\n')
-      throw new Error(`the TUI never said ${re}\n--- the last thing it drew ---\n${visto}\n---`)
+      const seen = api.screen().split('\n').filter((l) => l.trim()).slice(-12).join('\n')
+      throw new Error(`the TUI never said ${re}\n--- the last thing it drew ---\n${seen}\n---`)
     },
     /** ¿Llegó a decir esto? (sin fallar si no) */
-    async dijo (re, ms = 4000) { try { await api.esperar(re, ms); return true } catch { return false } },
-    cerrar () { try { p.stdin.write('q') } catch (_) {} ; setTimeout(() => { try { p.kill('SIGKILL') } catch (_) {} }, 800) }
+    async said (re, ms = 4000) { try { await api.waitFor(re, ms); return true } catch { return false } },
+    close () { try { p.stdin.write('q') } catch (_) {} ; setTimeout(() => { try { p.kill('SIGKILL') } catch (_) {} }, 800) }
   }
   return api
 }
@@ -97,19 +97,19 @@ function abrirTui ({ dir, lang = 'es', cols = 120, rows = 60 } = {}) {
 // null siempre, y cada escenario que necesitaba el QR fallaba con «la TUI no llegó a abrir
 // un emparejamiento» aunque la TUI lo tuviera en pantalla.
 const { ipcRead } = await import(path.join(ROOT, 'dotrino-vault/src/ipc.js'))
-const leerJson = (f) => ipcRead(f, null)
+const readJson = (f) => ipcRead(f, null)
 
 /**
  * El QR que la TUI acaba de abrir: se lee del MISMO archivo que ella está pintando, en vez
  * de rescatar el base64 de la pantalla (que el terminal recorta al ancho de la ventana).
  * `desdeMs` descarta el del escenario anterior.
  */
-async function invitacionEnPantalla (dir, desdeMs) {
+async function invitationOnScreen (dir, sinceMs) {
   const f = path.join(dir, 'pair.json')
-  const hasta = Date.now() + 15000
-  while (Date.now() < hasta) {
-    const d = leerJson(f)
-    if (d?.qr && (d.at || 0) >= desdeMs) return d.qr
+  const until = Date.now() + 15000
+  while (Date.now() < until) {
+    const d = readJson(f)
+    if (d?.qr && (d.at || 0) >= sinceMs) return d.qr
     await sleep(150)
   }
   throw new Error('the TUI never opened a pairing')
@@ -120,48 +120,48 @@ async function invitacionEnPantalla (dir, desdeMs) {
  * la lista de bóvedas). Cada escenario empieza desde ahí: así uno que falle no arrastra a
  * los siguientes por dejar la pantalla en otro sitio.
  */
-async function aDispositivos () {
+async function toDevices () {
   for (let i = 0; i < 5; i++) {
-    tui.teclas('\x1b')
+    tui.keys('\x1b')
     await sleep(600)
-    const p = tui.pantalla()
+    const p = tui.screen()
     if (/▐ Dispositivos/.test(p)) return
-    if (/» Bóvedas/.test(p)) { tui.teclas('\r'); await tui.esperar(/▐ Dispositivos/); return }
+    if (/» Bóvedas/.test(p)) { tui.keys('\r'); await tui.waitFor(/▐ Dispositivos/); return }
   }
   throw new Error('could not go back to Devices')
 }
 
 /** Abre un emparejamiento desde Dispositivos y devuelve la invitación. */
-async function abrirEmparejamiento () {
-  await aDispositivos()
+async function openPairing () {
+  await toDevices()
   const t0 = Date.now()
-  tui.teclas('p')
-  await tui.esperar(/A qué cuenta|Cuenta nueva|Esta bóveda/i)
-  await tui.esperar(/Entrar a esta cuenta/i)
-  tui.teclas('\r') // «esta bóveda»
+  tui.keys('p')
+  await tui.waitFor(/A qué cuenta|Cuenta nueva|Esta bóveda/i)
+  await tui.waitFor(/Entrar a esta cuenta/i)
+  tui.keys('\r') // «esta bóveda»
   // Y AHORA PIDE EL NOMBRE DEL APARATO. No es un fallo: es el paso que llegó con `--name`
   // («cómo se llamará el aparato que entre»), y este test es anterior — se quedaba
   // esperando el QR delante de un campo de texto que nadie rellenaba, y de ahí colgaban
   // los cuatro escenarios siguientes.
-  await tui.esperar(/se va a llamar|going to be called/i)
-  tui.teclas('tui\r')
-  await tui.esperar(/Cuenta que se comparte/)
+  await tui.waitFor(/se va a llamar|going to be called/i)
+  tui.keys('tui\r')
+  await tui.waitFor(/Cuenta que se comparte/)
   // Al final de esa pantalla, debajo del QR, es donde se avisa de quién se conectó. El QR
   // ocupa más que el terminal, así que se baja del todo — lo mismo que hace el dueño.
-  tui.teclas('\x1b[F')
+  tui.keys('\x1b[F')
   await sleep(400)
-  return invitacionEnPantalla(vault.dir, t0)
+  return invitationOnScreen(vault.dir, t0)
 }
 
 /** Un aparato de verdad que se enrola con esa invitación y enseña su código. */
-async function aparato (qr, label) {
+async function pairingDevice (qr, label) {
   let code = null
-  const enrolado = enroll({ qr, label, dir: tmpDir('tui-' + label), onChallenge: (c) => { code = c.code } })
-  enrolado.catch(() => {}) // el rechazo se mira donde toca; aquí no queremos un unhandled
-  const hasta = Date.now() + 15000
-  while (!code && Date.now() < hasta) await sleep(50)
-  assert.ok(code, 'el aparato enseña un código de seis dígitos')
-  return { code, enrolado }
+  const enrolled = enroll({ qr, label, dir: tmpDir('tui-' + label), onChallenge: (c) => { code = c.code } })
+  enrolled.catch(() => {}) // el rechazo se mira donde toca; aquí no queremos un unhandled
+  const until = Date.now() + 15000
+  while (!code && Date.now() < until) await sleep(50)
+  assert.ok(code, 'the device shows a six-digit code')
+  return { code, enrolled }
 }
 
 /**
@@ -175,7 +175,7 @@ async function aparato (qr, label) {
  *
  * Devuelve `{ error, aviso }`: lo que contestó y el aviso firmado, si llegó.
  */
-async function llamaUnExpulsado ({ device, cert }) {
+async function expelledCalls ({ device, cert }) {
   const client = new WebSocketProxyClient({ url: proxy.url, enableWebRTC: false, autoReconnect: false })
   await client.connect()
   try {
@@ -184,49 +184,49 @@ async function llamaUnExpulsado ({ device, cert }) {
     const idSig = await signWithDevice({ privateJwk: device.privateJwk, data: idData })
     await client.identify({ data: idData, signature: idSig.signature, cert })
 
-    let aviso = null
+    let notice = null
     let error = null
     const off = client.on('message', (_f, p) => {
-      if (p?.type === MSG.REVOKED) aviso = p
+      if (p?.type === MSG.REVOKED) notice = p
       else if (p?.type === MSG.ERROR) error = p.error
     })
-    const data = { op: 'sign', payload: { hola: 'sigo aquí' }, publickey: device.publickey, ts: Date.now() }
+    const data = { op: 'sign', payload: { hello: 'still here' }, publickey: device.publickey, ts: Date.now() }
     const { signature } = await signWithDevice({ privateJwk: device.privateJwk, data })
     client.sendByPubkey(vault.iss, { type: MSG.SIGN, data, signature, cert })
-    const hasta = Date.now() + 12000
-    while (Date.now() < hasta && !(aviso && error)) await sleep(150)
+    const until = Date.now() + 12000
+    while (Date.now() < until && !(notice && error)) await sleep(150)
     off()
-    return { error, aviso }
+    return { error, notice }
   } finally { try { client.close() } catch (_) {} }
 }
 
-const miembros = () => vault.acta()?.members || []
-const miembroDe = (pub) => miembros().find((m) => m.pub === pub)
+const recordMembers = () => vault.acta()?.members || []
+const memberOf = (pub) => recordMembers().find((m) => m.pub === pub)
 
 // ---------------------------------------------------------------------------
 // Escenarios
 // ---------------------------------------------------------------------------
 
-let primero = null // el aparato del escenario 2, que administran los de más abajo
-let quitado = null // el que se expulsa al final, para comprobar que se le avisa
+let first = null // el aparato del escenario 2, que administran los de más abajo
+let removed = null // el que se expulsa al final, para comprobar que se le avisa
 
-scenario('la TUI abre, entra en la bóveda y la lista sale ENTERA (con la propia bóveda)', async () => {
-  await tui.esperar(/Bóveda activa/)
+scenario('the TUI opens, enters the vault and the list comes out WHOLE (with the vault itself)', async () => {
+  await tui.waitFor(/Bóveda activa/)
   const t0 = Date.now()
-  tui.teclas('\r') // Enter: entrar en la bóveda seleccionada
+  tui.keys('\r') // Enter: entrar en la bóveda seleccionada
   // Una bóveda recién hecha ya tiene un miembro: ella misma, que es la que manda.
-  const p = await tui.esperar(/esta bóveda/)
-  assert.match(p, /[0-9A-F]{4}-[0-9A-F]{4}/, 'con su identificador')
+  const p = await tui.waitFor(/esta bóveda/)
+  assert.match(p, /[0-9A-F]{4}-[0-9A-F]{4}/, 'with its identifier')
   // «(sin dispositivos enrolados)» AQUÍ no es una lista vacía: es que el acta no llegó —
   // exactamente lo que se veía cuando el volcado se pisaba a sí mismo.
-  assert.ok(!/sin dispositivos enrolados/.test(p), 'el acta llegó, no se pinta una lista vacía')
-  assert.ok(!/daemon no responde|no respondió/i.test(p), 'y sin plantón del daemon')
+  assert.ok(!/sin dispositivos enrolados/.test(p), 'the record arrived, no empty list is drawn')
+  assert.ok(!/daemon no responde|no respondió/i.test(p), 'and the daemon did not stand us up')
   // Y llega PRONTO: esperar la lista de bóvedas, que ya no viene sola, costaba seis
   // segundos por refresco (los de rendirse) con el daemon contestando en cien milisegundos.
-  assert.ok(Date.now() - t0 < 6000, `la lista tarda lo que tarda el daemon (${Date.now() - t0} ms)`)
+  assert.ok(Date.now() - t0 < 6000, `the list takes as long as the daemon (${Date.now() - t0} ms)`)
 })
 
-scenario('entrar en la bóveda trae TAMBIÉN las variables (Scopes no sale en blanco)', async () => {
+scenario('entering the vault ALSO loads the variables (Scopes is not blank)', async () => {
   // La variable se guarda con la TUI ya abierta: lo que ella tiene en memoria es de antes.
   await vault.setSecret('proxy', 'TURN_KEY_ID', 'k-123', true)
 
@@ -235,15 +235,15 @@ scenario('entrar en la bóveda trae TAMBIÉN las variables (Scopes no sale en bl
   // a propósito, así que entrar TIENE que recargar. Antes solo se recargaba al CAMBIAR de
   // bóveda, y lo que se recargaba eran los aparatos: Scopes se quedaba en blanco hasta que
   // a alguien se le ocurriera pulsar F5.
-  await aDispositivos()
-  tui.teclas('\x1b')
-  await tui.esperar(/Bóveda activa/)
-  tui.teclas('\r')
-  await tui.esperar(/▐ Dispositivos/)
-  tui.teclas('\x1b[C') // → : la pestaña de al lado
-  const p = await tui.esperar(/proxy/, 8000)
-  assert.ok(!/sin scopes/.test(p), 'la variable está ahí sin tener que refrescar a mano')
-  assert.match(p, /TURN_KEY_ID/, 'con su nombre')
+  await toDevices()
+  tui.keys('\x1b')
+  await tui.waitFor(/Bóveda activa/)
+  tui.keys('\r')
+  await tui.waitFor(/▐ Dispositivos/)
+  tui.keys('\x1b[C') // → : la pestaña de al lado
+  const p = await tui.waitFor(/proxy/, 8000)
+  assert.ok(!/sin scopes/.test(p), 'the variable is there without a manual refresh')
+  assert.match(p, /TURN_KEY_ID/, 'with its name')
 
   // EL VALOR NO SALE EN LA LISTA, y esto CAMBIÓ el 2026-09-02: desde que todas las
   // variables van en sobre, «pública» dejó de significar «en claro» — dice a quién se le
@@ -253,219 +253,219 @@ scenario('entrar en la bóveda trae TAMBIÉN las variables (Scopes no sale en bl
   // Este test afirmaba lo contrario y llevaba días en rojo por eso, arrastrando con él a
   // los seis escenarios de abajo. Es el patrón de siempre: una aserción que sobrevive al
   // cambio que la deroga y que nadie vuelve a leer.
-  assert.ok(!/k-123/.test(p), 'el valor NO se enseña en la lista: va en sobre como cualquiera')
+  assert.ok(!/k-123/.test(p), 'the value is NOT shown in the list: it is enveloped like any other')
 
   // LO QUE SÍ: revelarla a demanda con «v», y sin pedir contraseña — que es exactamente lo
   // que «pública» significa ahora.
   // El cursor entra en el SCOPE, y «v» solo revela sobre una variable: hay que bajar a
   // ella. No es un rodeo del test, es cómo se usa.
-  tui.teclas('\x1b[B')
-  tui.teclas('v')
-  const revelado = await tui.esperar(/k-123/, 8000)
-  assert.match(revelado, /k-123/, 'una pública se revela sin contraseña')
+  tui.keys('\x1b[B')
+  tui.keys('v')
+  const revealed = await tui.waitFor(/k-123/, 8000)
+  assert.match(revealed, /k-123/, 'a public one is revealed without a password')
 })
 
-scenario('emparejar con P: sale el QR, el aparato se conecta y con el código entra al acta', async () => {
-  const qr = await abrirEmparejamiento()
-  assert.match(tui.todo(), /vault\.dotrino\.com|http/, 'enseña el enlace para pegar')
-  primero = await aparato(qr, 'celular')
+scenario('pair with P: the QR shows up, the device connects and with the code joins the record', async () => {
+  const qr = await openPairing()
+  assert.match(tui.all(), /vault\.dotrino\.com|http/, 'it shows the link to paste')
+  first = await pairingDevice(qr, 'phone')
 
-  await tui.esperar(/Se conectó|PENDIENTE/)
-  tui.teclas('a')
-  await tui.esperar(/Código que MUESTRA/)
-  tui.teclas(primero.code + '\r')
-  await tui.esperar(/Dispositivo aprobado/)
+  await tui.waitFor(/Se conectó|PENDIENTE/)
+  tui.keys('a')
+  await tui.waitFor(/Código que MUESTRA/)
+  tui.keys(first.code + '\r')
+  await tui.waitFor(/Dispositivo aprobado/)
 
-  const res = await primero.enrolado
-  primero.pub = res.device.publickey
-  assert.ok(res.cert, 'el aparato recibe su certificado')
-  assert.ok(miembroDe(primero.pub), 'y entra en el acta del perfil')
+  const res = await first.enrolled
+  first.pub = res.device.publickey
+  assert.ok(res.cert, 'the device receives its certificate')
+  assert.ok(memberOf(first.pub), 'and joins the profile record')
 
   // Y LA PANTALLA LO ENSEÑA, sin tener que refrescar a mano: la lista sale del acta, y
   // aprobar solo guardaba los certificados — el aparato recién entrado no aparecía.
   // Se busca por su IDENTIFICADOR y no por la etiqueta: la que se ve es la que se tecleó en
   // la bóveda al abrir el emparejamiento («tui»), que manda sobre la que trae el aparato.
-  const hex = (await pubkeyId(primero.pub)).slice(0, 8).toUpperCase()
-  const idLegible = hex.slice(0, 4) + '-' + hex.slice(4)
-  await tui.esperar(new RegExp(idLegible), 8000)
+  const hex = (await pubkeyId(first.pub)).slice(0, 8).toUpperCase()
+  const readableId = hex.slice(0, 4) + '-' + hex.slice(4)
+  await tui.waitFor(new RegExp(readableId), 8000)
 })
 
-scenario('un SERVICIO se empareja desde la TUI, y entra al acta con su cn', async () => {
+scenario('a SERVICE pairs from the TUI, and joins the record with its cn', async () => {
   // Esto solo existía en la línea de comandos (`pair --service <ns>`): la TUI llevaba al
   // dueño hasta el QR y ahí lo dejaba, teniendo que salirse a la terminal para la única
   // clase de aparato que luego lee variables. Ahora es la tercera opción de la pregunta.
-  await aDispositivos()
+  await toDevices()
   const t0 = Date.now()
-  tui.teclas('p')
-  await tui.esperar(/A qué cuenta|Cuenta nueva|Esta bóveda/i)
-  tui.teclas('\x1b[B\x1b[B\r')            // ↓ ↓ Enter: «Conectar un servicio»
-  await tui.esperar(/Qué servicio es/i)
-  tui.teclas('proxy\r')
+  tui.keys('p')
+  await tui.waitFor(/A qué cuenta|Cuenta nueva|Esta bóveda/i)
+  tui.keys('\x1b[B\x1b[B\r')            // ↓ ↓ Enter: «Conectar un servicio»
+  await tui.waitFor(/Qué servicio es/i)
+  tui.keys('proxy\r')
 
   // El QR dice QUÉ se está entregando: no es un aparato del dueño, es un papel que solo
   // sirve para leer las variables de ese ns.
-  const p = await tui.esperar(/Cuenta que se comparte/)
-  assert.match(p, /SERVICIO «proxy»/, 'la pantalla avisa de que el QR es de un servicio')
+  const p = await tui.waitFor(/Cuenta que se comparte/)
+  assert.match(p, /SERVICIO «proxy»/, 'the screen warns that the QR is for a service')
 
-  tui.teclas('\x1b[F')
+  tui.keys('\x1b[F')
   await sleep(400)
-  const qr = await invitacionEnPantalla(vault.dir, t0)
-  const svc = await aparato(qr, 'proxy-vps')
+  const qr = await invitationOnScreen(vault.dir, t0)
+  const svc = await pairingDevice(qr, 'proxy-vps')
 
-  await tui.esperar(/Se conectó|PENDIENTE/)
-  tui.teclas('a')
-  await tui.esperar(/Código que MUESTRA/)
-  tui.teclas(svc.code + '\r')
-  await tui.esperar(/Dispositivo aprobado/)
+  await tui.waitFor(/Se conectó|PENDIENTE/)
+  tui.keys('a')
+  await tui.waitFor(/Código que MUESTRA/)
+  tui.keys(svc.code + '\r')
+  await tui.waitFor(/Dispositivo aprobado/)
 
-  const res = await svc.enrolado
-  assert.ok(res.cert, 'el servicio recibe su certificado')
-  const m = miembroDe(res.device.publickey)
-  assert.ok(m, 'y entra en el acta')
+  const res = await svc.enrolled
+  assert.ok(res.cert, 'the service receives its certificate')
+  const m = memberOf(res.device.publickey)
+  assert.ok(m, 'and joins the record')
   // LO QUE IMPORTA: el acta lo reconoce como el servicio «proxy». Sin `cn` no puede pedir
   // sus variables (la bóveda mira el acta, no solo el scope del certificado).
-  assert.equal(m.cn, 'proxy', 'el acta lo reconoce como el servicio «proxy»')
+  assert.equal(m.cn, 'proxy', 'the record recognises it as the «proxy» service')
 })
 
-scenario('CÓDIGO EQUIVOCADO: la TUI lo dice y NO da por aprobado a nadie', async () => {
-  const antes = miembros().length
-  const qr = await abrirEmparejamiento()
-  const intruso = await aparato(qr, 'intruso')
+scenario('WRONG CODE: the TUI says so and does NOT approve anyone', async () => {
+  const before = recordMembers().length
+  const qr = await openPairing()
+  const intruder = await pairingDevice(qr, 'intruder')
 
-  await tui.esperar(/Se conectó|PENDIENTE/)
-  const malo = String((Number(intruso.code) + 7) % 1000000).padStart(6, '0')
-  tui.teclas('a')
-  await tui.esperar(/Código que MUESTRA/)
-  tui.teclas(malo + '\r')
+  await tui.waitFor(/Se conectó|PENDIENTE/)
+  const wrong = String((Number(intruder.code) + 7) % 1000000).padStart(6, '0')
+  tui.keys('a')
+  await tui.waitFor(/Código que MUESTRA/)
+  tui.keys(wrong + '\r')
 
   // LA REGRESIÓN: esto decía «Dispositivo aprobado» y se olvidaba del pendiente, así que
   // ni entraba nadie ni se podía reintentar. Ahora se dice lo que pasó.
-  const p = await tui.esperar(/no coincide|does not match/i)
-  assert.ok(!/Dispositivo aprobado/.test(p), 'no canta un aprobado que no ocurrió')
-  assert.equal(miembros().length, antes, 'nadie entró en el acta')
+  const p = await tui.waitFor(/no coincide|does not match/i)
+  assert.ok(!/Dispositivo aprobado/.test(p), 'it does not announce an approval that did not happen')
+  assert.equal(recordMembers().length, before, 'nobody joined the record')
 
   // Y el pendiente sigue ahí: con el código bueno, entra.
-  tui.teclas('a')
-  await tui.esperar(/Código que MUESTRA/)
-  tui.teclas(intruso.code + '\r')
-  await tui.esperar(/Dispositivo aprobado/)
-  const res = await intruso.enrolado
-  assert.ok(res.cert, 'con el código correcto sí se emite el certificado')
-  assert.equal(miembros().length, antes + 1)
+  tui.keys('a')
+  await tui.waitFor(/Código que MUESTRA/)
+  tui.keys(intruder.code + '\r')
+  await tui.waitFor(/Dispositivo aprobado/)
+  const res = await intruder.enrolled
+  assert.ok(res.cert, 'with the right code the certificate is issued')
+  assert.equal(recordMembers().length, before + 1)
 })
 
-scenario('permisos con C: administrar se PREGUNTA antes, y queda en el acta', async () => {
-  assert.ok(primero?.pub, 'hace falta el aparato del escenario de emparejar')
-  assert.ok(!(miembroDe(primero.pub).caps || []).includes('admin'), 'nace sin administrar')
+scenario('permissions with C: admin is ASKED first, and stays in the record', async () => {
+  assert.ok(first?.pub, 'needs the device from the pairing scenario')
+  assert.ok(!(memberOf(first.pub).caps || []).includes('admin'), 'it is born without admin')
 
-  await aDispositivos()
+  await toDevices()
   // LA FILA DEL APARATO SE BUSCA, no se supone. La lista sale del acta en su orden, y
   // «la segunda» dejó de ser el aparato cuando la llave de comunicación de la bóveda entró
   // como miembro: es un servicio, sus permisos empiezan por su cajón, y bajar tres filas
   // marcaba «lee» en vez de «administra».
-  const fila = miembros().findIndex((m) => m.pub === primero.pub)
-  assert.ok(fila >= 0, 'el aparato está en el acta')
-  tui.teclas('\x1b[H' + '\x1b[B'.repeat(fila))
+  const row = recordMembers().findIndex((m) => m.pub === first.pub)
+  assert.ok(row >= 0, 'the device is in the record')
+  tui.keys('\x1b[H' + '\x1b[B'.repeat(row))
   await sleep(300)
-  tui.teclas('c')
-  const p = await tui.esperar(/Permisos de/)
+  tui.keys('c')
+  const p = await tui.waitFor(/Permisos de/)
   // El título de cada permiso es SU NOMBRE en la CLI (`caps <ID> +administra`), y lo que hace
   // va debajo. Antes eran frases («Firmar como tú»…), y esta prueba se quedó con ellas.
-  for (const texto of [/\bfirma\b/, /\bguarda\b/, /\blee\b/, /\badministra\b/]) {
-    assert.match(p, texto, 'los cuatro permisos, con el nombre que se teclea en la CLI')
+  for (const text of [/\bfirma\b/, /\bguarda\b/, /\blee\b/, /\badministra\b/]) {
+    assert.match(p, text, 'the four permissions, with the name typed in the CLI')
   }
 
   // Bajar hasta «administra» (el cuarto) y marcarlo. Enter solo mueve el BORRADOR: se firma
   // con G, una sola acta con todo lo tocado.
-  tui.teclas('\x1b[B\x1b[B\x1b[B')
+  tui.keys('\x1b[B\x1b[B\x1b[B')
   await sleep(300)
-  tui.teclas('\r')
+  tui.keys('\r')
   await sleep(300)
-  tui.teclas('g')
+  tui.keys('g')
   // Es el único que se pregunta, y al GUARDAR: deja a ese aparato meter y sacar dispositivos sin venir.
-  await tui.esperar(/conecte y quite dispositivos/)
-  tui.teclas('y')
-  await tui.esperar(/guardados/)
+  await tui.waitFor(/conecte y quite dispositivos/)
+  tui.keys('y')
+  await tui.waitFor(/guardados/)
 
-  const hasta = Date.now() + 8000
-  while (Date.now() < hasta && !(miembroDe(primero.pub).caps || []).includes('admin')) await sleep(200)
-  assert.ok((miembroDe(primero.pub).caps || []).includes('admin'), 'el acta lo recoge')
+  const until = Date.now() + 8000
+  while (Date.now() < until && !(memberOf(first.pub).caps || []).includes('admin')) await sleep(200)
+  assert.ok((memberOf(first.pub).caps || []).includes('admin'), 'the record picks it up')
 
   // Y quitarlo no se pregunta: quitar un permiso no expone nada.
-  tui.teclas('\r')
+  tui.keys('\r')
   await sleep(300)
-  tui.teclas('g')
-  await tui.esperar(/guardados/)
-  const hasta2 = Date.now() + 8000
-  while (Date.now() < hasta2 && (miembroDe(primero.pub).caps || []).includes('admin')) await sleep(200)
-  assert.ok(!(miembroDe(primero.pub).caps || []).includes('admin'), 'y también lo recoge al quitarlo')
+  tui.keys('g')
+  await tui.waitFor(/guardados/)
+  const until2 = Date.now() + 8000
+  while (Date.now() < until2 && (memberOf(first.pub).caps || []).includes('admin')) await sleep(200)
+  assert.ok(!(memberOf(first.pub).caps || []).includes('admin'), 'and also picks up its removal')
 })
 
-scenario('la bóveda no se echa a sí misma (V sobre el master)', async () => {
-  await aDispositivos()
-  const antes = miembros().length
-  tui.teclas('\x1b[H') // Home: la primera fila es el master
+scenario('the vault does not remove itself (V on the master)', async () => {
+  await toDevices()
+  const before = recordMembers().length
+  tui.keys('\x1b[H') // Home: la primera fila es el master
   await sleep(300)
-  tui.teclas('v')
-  await tui.esperar(/no se quita a sí misma/)
-  assert.equal(miembros().length, antes, 'y no manda la orden: el acta no cambia')
+  tui.keys('v')
+  await tui.waitFor(/no se quita a sí misma/)
+  assert.equal(recordMembers().length, before, 'and it sends no order: the record does not change')
 })
 
-scenario('quitar un aparato con V: sale del acta y la bóveda deja de firmarle', async () => {
-  const qr = await abrirEmparejamiento()
-  const perdido = await aparato(qr, 'perdido')
-  await tui.esperar(/Se conectó|PENDIENTE/)
-  tui.teclas('a')
-  await tui.esperar(/Código que MUESTRA/)
-  tui.teclas(perdido.code + '\r')
-  await tui.esperar(/Dispositivo aprobado/)
-  const res = await perdido.enrolado
+scenario('removing a device with V: it leaves the record and the vault stops signing for it', async () => {
+  const qr = await openPairing()
+  const lost = await pairingDevice(qr, 'lost')
+  await tui.waitFor(/Se conectó|PENDIENTE/)
+  tui.keys('a')
+  await tui.waitFor(/Código que MUESTRA/)
+  tui.keys(lost.code + '\r')
+  await tui.waitFor(/Dispositivo aprobado/)
+  const res = await lost.enrolled
 
   // Con su certificado vigente, la bóveda le firma lo que pida.
-  const firma = await requestSign({
+  const signed = await requestSign({
     masterPubkey: vault.iss, proxyUrl: proxy.url, device: res.device, cert: res.cert,
-    payload: { hola: 'mundo' }, dir: tmpDir('tui-firma-ok')
+    payload: { hello: 'world' }, dir: tmpDir('tui-sign-ok')
   })
-  assert.ok(firma.signature)
+  assert.ok(signed.signature)
 
   // La fila del aparato recién entrado es la última: End la selecciona.
-  tui.teclas('\x1b[F')
+  tui.keys('\x1b[F')
   await sleep(400)
-  tui.teclas('v')
-  await tui.esperar(/Quitar .*del perfil/)
-  tui.teclas('y')
-  await tui.esperar(/Revocado/)
+  tui.keys('v')
+  await tui.waitFor(/Quitar .*del perfil/)
+  tui.keys('y')
+  await tui.waitFor(/Revocado/)
 
-  const hasta = Date.now() + 8000
-  while (Date.now() < hasta && miembroDe(res.device.publickey)) await sleep(200)
-  assert.ok(!miembroDe(res.device.publickey), 'sale del acta')
+  const until = Date.now() + 8000
+  while (Date.now() < until && memberOf(res.device.publickey)) await sleep(200)
+  assert.ok(!memberOf(res.device.publickey), 'it leaves the record')
 
   await assert.rejects(
     () => requestSign({
       masterPubkey: vault.iss, proxyUrl: proxy.url, device: res.device, cert: res.cert,
-      payload: { hola: 'otra vez' }, dir: tmpDir('tui-firma-ko')
+      payload: { hello: 'again' }, dir: tmpDir('tui-sign-ko')
     }),
     /unauthorized|no autorizado/,
-    'quitarlo desde la TUI le corta el acceso de verdad, no solo en pantalla'
+    'removing it from the TUI really cuts its access, not just on screen'
   )
 
-  quitado = res
+  removed = res
 })
 
-scenario('al expulsado que vuelve a llamar se le ATIENDE, para poder darle el aviso firmado', async () => {
-  assert.ok(quitado, 'hace falta el aparato que se quitó en el escenario anterior')
+scenario('an expelled device that calls again is ANSWERED, so it can get the signed notice', async () => {
+  assert.ok(removed, 'needs the device removed in the previous scenario')
   // Que la bóveda NO firme ya está probado arriba. Lo que se prueba aquí es lo contrario y
   // es igual de importante: que no le cuelgue. Un aparato que fue tuyo tiene que poder
   // llegar hasta la bóveda precisamente para que se le pueda mandar a paseo — el aviso
   // firmado es lo único que le borra la cuenta, y si estaba apagado cuando lo quitaste,
   // la única forma de dárselo es cuando vuelve.
-  const { error, aviso } = await llamaUnExpulsado(quitado)
-  assert.match(String(error || ''), /unauthorized/, 'se le contesta, no se le ignora')
-  assert.ok(aviso, 'y le llega el aviso de expulsión, no solo el error')
+  const { error, notice } = await expelledCalls(removed)
+  assert.match(String(error || ''), /unauthorized/, 'it gets an answer, it is not ignored')
+  assert.ok(notice, 'and it gets the expulsion notice, not just the error')
   assert.equal(
-    await verifyRevoke({ body: aviso.body, signature: aviso.signature, master: vault.iss, devicePubkey: quitado.device.publickey }),
+    await verifyRevoke({ body: notice.body, signature: notice.signature, master: vault.iss, devicePubkey: removed.device.publickey }),
     true,
-    'FIRMADO por la maestra y para ESTE aparato: es lo único que le puede borrar la cuenta'
+    'SIGNED by the master key and for THIS device: the only thing that can erase its account'
   )
 })
 
@@ -481,43 +481,43 @@ scenario('al expulsado que vuelve a llamar se le ATIENDE, para poder darle el av
  * contestando. Antes el `join` se esperaba dentro del bucle que atiende las peticiones, así
  * que durante esos minutos la TUI de B recibía «el daemon no respondió» a todo.
  */
-scenario('j: otra bóveda pega la invitación en SU TUI y entra en la cuenta', async () => {
+scenario('j: another vault pastes the invitation in ITS TUI and joins the account', async () => {
   const { encodeInvite } = await import(path.join(ROOT, 'dotrino-vault/lib/src/invite.js'))
-  const b = await startVault({ proxyUrl: proxy.url, name: 'boveda-b', log })
-  const tuiB = abrirTui({ dir: b.dir })
+  const b = await startVault({ proxyUrl: proxy.url, name: 'vault-b', log })
+  const tuiB = openTui({ dir: b.dir })
   try {
-    await tuiB.esperar(/Bóveda activa/)
-    const antes = (await vault.members()).members.length
+    await tuiB.waitFor(/Bóveda activa/)
+    const before = (await vault.members()).members.length
 
     const qr = await vault.pair()
-    tuiB.teclas('j')
-    await tuiB.esperar(/Invitación de la otra bóveda/)
-    tuiB.teclas(encodeInvite(qr) + '\r')
-    await tuiB.esperar(/Cómo se llamará aquí/)
-    tuiB.teclas('Cuenta A\r')
-    const conCodigo = await tuiB.esperar(/approve \d{6}/)
-    const code = conCodigo.match(/approve (\d{6})/)[1]
+    tuiB.keys('j')
+    await tuiB.waitFor(/Invitación de la otra bóveda/)
+    tuiB.keys(encodeInvite(qr) + '\r')
+    await tuiB.waitFor(/Cómo se llamará aquí/)
+    tuiB.keys('Cuenta A\r')
+    const withCode = await tuiB.waitFor(/approve \d{6}/)
+    const code = withCode.match(/approve (\d{6})/)[1]
     log('[test] B shows the code ' + code)
 
     // B está esperando a una persona: su daemon tiene que seguir atendiendo igual.
     const t0 = Date.now()
     await b.members(5000)
-    assert.ok(Date.now() - t0 < 5000, 'el daemon de B contesta mientras espera el código')
+    assert.ok(Date.now() - t0 < 5000, 'B\'s daemon answers while it waits for the code')
 
     vault.approve(code)
-    const hecho = await tuiB.esperar(/acta #\d+/, 30000)
-    assert.match(hecho, /contraseña/, 'y avisa de ponerle contraseña antes de darle «sella»')
+    const done = await tuiB.waitFor(/acta #\d+/, 30000)
+    assert.match(done, /contraseña/, 'and it warns to set a password before granting «sella»')
 
-    const actaA = await vault.members()
-    assert.equal(actaA.members.length, antes + 1, 'B entra en el acta de A')
-    const actaB = await b.members()
-    if (actaA.profileId || actaB.profileId) assert.equal(actaB.profileId, actaA.profileId, 'y B tiene LA MISMA cuenta, no una copia')
+    const recordA = await vault.members()
+    assert.equal(recordA.members.length, before + 1, 'B joins A\'s record')
+    const recordB = await b.members()
+    if (recordA.profileId || recordB.profileId) assert.equal(recordB.profileId, recordA.profileId, 'and B has THE SAME account, not a copy')
 
-    tuiB.teclas('\r')
-    const lista = await tuiB.esperar(/Cuenta A/)
-    assert.match(lista, /Bóveda activa: ● Cuenta A/, 'la cuenta nueva es la activa')
+    tuiB.keys('\r')
+    const list = await tuiB.waitFor(/Cuenta A/)
+    assert.match(list, /Bóveda activa: ● Cuenta A/, 'the new account is the active one')
   } finally {
-    tuiB.cerrar()
+    tuiB.close()
   }
 })
 
@@ -532,20 +532,20 @@ if (spawnSync('script', ['--version'], { stdio: 'ignore' }).status !== 0) {
 }
 try {
   proxy = await startProxy({ log })
-  vault = await startVault({ proxyUrl: proxy.url, name: 'boveda', log })
+  vault = await startVault({ proxyUrl: proxy.url, name: 'vault', log })
   console.log(`  proxy   ${proxy.url}`)
   console.log(`  vault   ${vault.state.fingerprint}  (data in ${vault.dir})`)
   console.log('  TUI     node bin/dotrino-vault-tui.js, in a 120×60 pty\n')
-  tui = abrirTui({ dir: vault.dir })
+  tui = openTui({ dir: vault.dir })
 
   const ok = await runScenarios()
-  tui.cerrar()
+  tui.close()
   await sleep(600)
   await teardown()
   process.exit(ok ? 0 : 1)
 } catch (e) {
   console.error('\ncould not set up the scenario:', e?.stack || e)
-  try { tui?.cerrar() } catch (_) {}
+  try { tui?.close() } catch (_) {}
   await teardown()
   process.exit(1)
 }

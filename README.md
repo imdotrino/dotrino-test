@@ -23,13 +23,13 @@ bilingüe es/en (§9) y `noindex` + `robots` en `Disallow: /` por ser interna (�
 
 ```sh
 npm run smoke                 # todo
-npm run smoke:dispositivos    # cada aparato en su contenedor, contra el binario
-npm run smoke:configuracion   # proxio ↔ bóveda, de caja negra
-npm run smoke:navegador       # con Playwright (incluye el PERFIL EN SOBRES, de punta a punta)
-npm run smoke:consola
+npm run smoke:devices    # cada aparato en su contenedor, contra el binario
+npm run smoke:settings   # proxio ↔ bóveda, de caja negra
+npm run smoke:browser       # con Playwright (incluye el PERFIL EN SOBRES, de punta a punta)
+npm run smoke:console
 npm run smoke:tui
-npm run smoke:interfaz
-npm run smoke:sellado         # dos desconocidos se sellan (llave averiguada, no emparejada)
+npm run smoke:ui
+npm run smoke:sealed-strangers         # dos desconocidos se sellan (llave averiguada, no emparejada)
 ```
 
 Cada uno arranca lo que necesita y lo apaga al terminar.

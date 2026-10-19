@@ -9,7 +9,7 @@
  *   · lo exportado sale cifrado y trae los valores de ahora;
  *   · y sobrevive a recargar la página (IndexedDB).
  *
- *   npm run smoke:respaldo-pestana
+ *   npm run smoke:tab-vault-backup
  */
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -19,31 +19,31 @@ import { scenario, runScenarios, startProxy, teardown, serveStatic, ROOT } from 
 
 const { chromium } = await import('playwright')
 const { sealBackup, openBackup } = await import(path.join(ROOT, 'dotrino-vault', 'lib', 'src', 'core', 'backup.js'))
-const PWD = 'contraseña del respaldo de prueba'
+const PWD = 'test backup password'
 
-scenario('la bóveda-pestaña exporta e importa su respaldo, con choques', async () => {
+scenario('the tab vault exports and imports its backup, with conflicts', async () => {
   const proxy = await startProxy()
   const iframe = await serveStatic(path.join(ROOT, 'dotrino-identity', 'vault'))
-  const raiz = fs.mkdtempSync(path.join(os.tmpdir(), 'respaldo-pestana-'))
-  fs.writeFileSync(path.join(raiz, 'index.html'), `<!doctype html><meta charset=utf-8><body>
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tab-vault-backup-'))
+  fs.writeFileSync(path.join(root, 'index.html'), `<!doctype html><meta charset=utf-8><body>
 <iframe id=f src="${iframe.url}/index.html?proxy=${proxy.url}"></iframe><script>
 let n = 0; const pend = new Map()
 addEventListener('message', (e) => { const m = e.data; if (m?._cci && m.type === 'response' && pend.has(m.id)) { const r = pend.get(m.id); pend.delete(m.id); m.error ? r.rej(Object.assign(new Error(typeof m.error === 'string' ? m.error : (m.error.message || JSON.stringify(m.error))), { code: m.error?.code || null })) : r.res(m.result) } })
 window.rpc = (method, params = {}) => new Promise((res, rej) => { const id = ++n; pend.set(id, { res, rej }); document.getElementById('f').contentWindow.postMessage({ _cci: true, type: 'request', id, method, params }, '*') })
 </script>`)
-  const pagina = await serveStatic(raiz)
+  const hostPage = await serveStatic(root)
 
-  const perfil = fs.mkdtempSync(path.join(os.tmpdir(), 'respaldo-pestana-chrome-'))
-  const ctx = await chromium.launchPersistentContext(perfil, { headless: true })
+  const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tab-vault-backup-chrome-'))
+  const ctx = await chromium.launchPersistentContext(profileDir, { headless: true })
   try {
     const page = await ctx.newPage()
     const rpc = (m, p) => page.evaluate(([m, p]) => window.rpc(m, p).then((r) => ({ r }), (e) => ({ e: e.message, code: e.code })), [m, p])
-    const hasta = async (fn, ms = 20000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await page.waitForTimeout(300) } return false }
+    const until = async (fn, ms = 20000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await page.waitForTimeout(300) } return false }
 
-    await page.goto(`${pagina.url}/index.html`)
+    await page.goto(`${hostPage.url}/index.html`)
     await page.waitForTimeout(2500)
     await rpc('setSelfVault', { enabled: true })
-    assert.ok(await hasta(async () => (await rpc('selfVaultStatus')).r?.running), 'la bóveda de la pestaña no arrancó')
+    assert.ok(await until(async () => (await rpc('selfVaultStatus')).r?.running), 'the tab vault did not start')
 
     const payload = (token) => ({
       v: 1, createdAt: 1, drawers: [
@@ -51,39 +51,39 @@ window.rpc = (method, params = {}) => new Promise((res, rej) => { const id = ++n
         { owner: 'ns:@me', vars: { nickname: { value: 'santi', public: true } } }
       ]
     })
-    const uno = await sealBackup(payload('uno'), PWD)
-    const plan = await rpc('selfVaultBackupPlan', { file: uno, password: PWD })
-    assert.equal(plan.r?.counts?.new, 3, 'el plan no ve los 3 nuevos: ' + (plan.e || JSON.stringify(plan.r)))
-    const imp = await rpc('selfVaultBackupImport', { file: uno, password: PWD })
-    assert.equal(imp.r?.written, 3, 'no importó: ' + (imp.e || JSON.stringify(imp.r)))
+    const one = await sealBackup(payload('uno'), PWD)
+    const plan = await rpc('selfVaultBackupPlan', { file: one, password: PWD })
+    assert.equal(plan.r?.counts?.new, 3, 'the plan does not see the 3 new entries: ' + (plan.e || JSON.stringify(plan.r)))
+    const imp = await rpc('selfVaultBackupImport', { file: one, password: PWD })
+    assert.equal(imp.r?.written, 3, 'did not import: ' + (imp.e || JSON.stringify(imp.r)))
 
-    const mala = await rpc('selfVaultBackupPlan', { file: uno, password: 'otra contraseña larga' })
-    assert.match(String(mala.e), /does not open/, 'abrió con otra contraseña')
+    const wrong = await rpc('selfVaultBackupPlan', { file: one, password: 'another long password' })
+    assert.match(String(wrong.e), /does not open/, 'it opened with another password')
 
-    const dos = await sealBackup(payload('dos'), PWD)
-    const sin = await rpc('selfVaultBackupImport', { file: dos, password: PWD })
-    assert.match(String(sin.e), /conflict/, 'importó con un choque sin decidir: ' + JSON.stringify(sin))
-    const con = await rpc('selfVaultBackupImport', { file: dos, password: PWD, decisions: { 'ns:proxy TOKEN': 'replace' } })
-    assert.equal(con.r?.written, 1, 'reemplazar no pisó: ' + (con.e || JSON.stringify(con.r)))
+    const two = await sealBackup(payload('dos'), PWD)
+    const undecided = await rpc('selfVaultBackupImport', { file: two, password: PWD })
+    assert.match(String(undecided.e), /conflict/, 'it imported with an undecided conflict: ' + JSON.stringify(undecided))
+    const decided = await rpc('selfVaultBackupImport', { file: two, password: PWD, decisions: { 'ns:proxy TOKEN': 'replace' } })
+    assert.equal(decided.r?.written, 1, 'replace did not overwrite: ' + (decided.e || JSON.stringify(decided.r)))
 
-    const cajones = await rpc('selfVaultBackupDrawers')
-    assert.ok(cajones.r?.some((d) => d.owner === 'ns:proxy' && d.count === 2), 'los cajones no salen: ' + (cajones.e || JSON.stringify(cajones.r)))
+    const drawers = await rpc('selfVaultBackupDrawers')
+    assert.ok(drawers.r?.some((d) => d.owner === 'ns:proxy' && d.count === 2), 'the drawers are not listed: ' + (drawers.e || JSON.stringify(drawers.r)))
 
     // Tras recargar, lo importado sigue ahí: se exporta y se abre aquí fuera.
     await page.reload()
     await page.waitForTimeout(2500)
-    assert.ok(await hasta(async () => (await rpc('selfVaultStatus')).r?.running), 'tras recargar no vuelve a arrancar')
+    assert.ok(await until(async () => (await rpc('selfVaultStatus')).r?.running), 'does not start again after reload')
     const exp = await rpc('selfVaultBackupExport', { password: PWD })
-    assert.ok(exp.r?.file, 'no exporta: ' + exp.e)
-    assert.ok(!JSON.stringify(exp.r.file).includes('dos'), 'el archivo lleva un valor en claro')
-    const abierto = await openBackup(exp.r.file, PWD)
-    const proxyD = abierto.drawers.find((d) => d.owner === 'ns:proxy')
+    assert.ok(exp.r?.file, 'does not export: ' + exp.e)
+    assert.ok(!JSON.stringify(exp.r.file).includes('dos'), 'the file carries a value in the clear')
+    const opened = await openBackup(exp.r.file, PWD)
+    const proxyD = opened.drawers.find((d) => d.owner === 'ns:proxy')
     assert.equal(proxyD?.vars.TOKEN.value, 'dos')
-    assert.equal(abierto.drawers.find((d) => d.owner === 'ns:@me')?.vars.nickname.value, 'santi')
+    assert.equal(opened.drawers.find((d) => d.owner === 'ns:@me')?.vars.nickname.value, 'santi')
   } finally {
     await ctx.close()
-    fs.rmSync(perfil, { recursive: true, force: true })
-    fs.rmSync(raiz, { recursive: true, force: true })
+    fs.rmSync(profileDir, { recursive: true, force: true })
+    fs.rmSync(root, { recursive: true, force: true })
   }
 })
 

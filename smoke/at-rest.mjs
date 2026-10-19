@@ -31,11 +31,11 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { scenario, runScenarios, startProxy, startVault, teardown } from './lib/harness.js'
 import * as atRest from '../../dotrino-vault/src/atrest.js'
+import { sleep } from './lib/wait.js'
 const { atRestFor } = atRest
 
 const VERBOSE = process.argv.includes('--verbose')
 const log = (m) => { if (VERBOSE) console.log(m) }
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 const MAGIC = 'DOTRINO-ATREST-v1.'
 const SECRET = 'UNA-SECRET-QUE-NO-DEBE-VERSE-JAMAS-8f3a1c'
@@ -82,9 +82,9 @@ function filesIn (dir) {
   return out
 }
 
-scenario('la bóveda trabaja: emparejar, contraseña y una variable guardada', async () => {
+scenario('the vault works: pairing, password and a stored variable', async () => {
   proxy = await startProxy({ log })
-  vault = await startVault({ proxyUrl: proxy.url, name: 'reposo', log })
+  vault = await startVault({ proxyUrl: proxy.url, name: 'at-rest', log })
 
   // Una contraseña de perfil: es lo que viaja por el canal local y lo que no debe quedar.
   await vault.profile('password', { password: PASSPHRASE })
@@ -94,12 +94,12 @@ scenario('la bóveda trabaja: emparejar, contraseña y una variable guardada', a
   await vault.setSecret('vault', 'TOKEN', SECRET)
   await sleep(800)
 
-  const acta = await vault.members()
-  assert.ok(acta?.members, 'la bóveda vuelca su acta')
-  log(`  members: ${acta.members.length}`)
+  const record = await vault.members()
+  assert.ok(record?.members, 'the vault dumps its record')
+  log(`  members: ${record.members.length}`)
 })
 
-scenario('ningún archivo del disco queda en claro', async () => {
+scenario('no file on disk is left in clear', async () => {
   const plaintext = []
   for (const f of filesIn(vault.dir)) {
     if (ALLOWED.has(f.name)) continue
@@ -111,38 +111,38 @@ scenario('ningún archivo del disco queda en claro', async () => {
     const head = f.name === 'activity.log' ? (text.split('\n')[0] || '') : text
     if (!head.startsWith(MAGIC)) plaintext.push(f.rel ? f.rel + '/' + f.name : f.name)
   }
-  assert.deepEqual(plaintext, [], 'archivos en claro que no están justificados: ' + plaintext.join(', '))
+  assert.deepEqual(plaintext, [], 'unjustified plaintext files: ' + plaintext.join(', '))
 })
 
-scenario('la única marca en claro (`key.json`) no lleva más que una pública', async () => {
+scenario('the only plaintext marker (`key.json`) holds nothing but a public key', async () => {
   // La excepción se justifica sola solo mientras el archivo siga siendo lo que dice ser.
   // Si un día se le cuelga un campo más, esto salta y hay que volver a decidirlo.
   for (const f of filesIn(vault.dir).filter((x) => x.name === 'key.json')) {
     const o = JSON.parse(fs.readFileSync(f.path_, 'utf8'))
-    assert.deepEqual(Object.keys(o).sort(), ['at', 'pub'], `${f.rel}/key.json creció: ` + Object.keys(o).join(', '))
-    assert.ok(/"key_ops":\["verify"\]/.test(o.pub), 'es una pública de verificación, no un par')
+    assert.deepEqual(Object.keys(o).sort(), ['at', 'pub'], `${f.rel}/key.json grew: ` + Object.keys(o).join(', '))
+    assert.ok(/"key_ops":\["verify"\]/.test(o.pub), 'it is a verification public key, not a pair')
   }
 })
 
-scenario('la bitácora no la puede leer otro usuario de la máquina (0600)', async () => {
+scenario('no other user on the machine can read the log (0600)', async () => {
   const worldReadable = filesIn(vault.dir)
     .filter((f) => (fs.statSync(f.path_).mode & 0o077) !== 0)
     .map((f) => `${f.rel ? f.rel + '/' : ''}${f.name} (${(fs.statSync(f.path_).mode & 0o777).toString(8)})`)
-  assert.deepEqual(worldReadable, [], 'archivos legibles por otros: ' + worldReadable.join(', '))
+  assert.deepEqual(worldReadable, [], 'files readable by others: ' + worldReadable.join(', '))
 })
 
-scenario('ni el valor ni la contraseña aparecen en ningún byte del disco', async () => {
+scenario('neither the value nor the password appears in any byte on disk', async () => {
   const offenders = []
   for (const f of filesIn(vault.dir)) {
     const bytes = fs.readFileSync(f.path_)
-    for (const [what, needle] of [['el valor', SECRET], ['la contraseña', PASSPHRASE]]) {
-      if (bytes.includes(needle)) offenders.push(`${what} en ${f.rel ? f.rel + '/' : ''}${f.name}`)
+    for (const [what, needle] of [['the value', SECRET], ['the password', PASSPHRASE]]) {
+      if (bytes.includes(needle)) offenders.push(`${what} in ${f.rel ? f.rel + '/' : ''}${f.name}`)
     }
   }
   assert.deepEqual(offenders, [], offenders.join(' · '))
 })
 
-scenario('ninguna llave privada anda suelta (`"d":` de un JWK)', async () => {
+scenario('no private key is lying around (a JWK `"d":`)', async () => {
   const offenders = []
   for (const f of filesIn(vault.dir)) {
     if (f.name === 'atrest.salt' || f.name === 'atrest.machine') continue
@@ -152,22 +152,22 @@ scenario('ninguna llave privada anda suelta (`"d":` de un JWK)', async () => {
       offenders.push(`${f.rel ? f.rel + '/' : ''}${f.name}`)
     }
   }
-  assert.deepEqual(offenders, [], 'llave privada en claro: ' + offenders.join(', '))
+  assert.deepEqual(offenders, [], 'private key in clear: ' + offenders.join(', '))
 })
 
-scenario('la llave de comunicación está en el acta con `cn: vault`, `sign` y SIN llave de cifrado', async () => {
-  const acta = await vault.members()
-  const comm = (acta.members || []).find((m) => m.cn === 'vault')
-  assert.ok(comm, 'la bóveda metió su llave de comunicación en su propia acta')
-  assert.deepEqual(comm.caps, ['sign'], 'solo firma: ni lee, ni guarda, ni sella')
+scenario('the communication key is in the record with `cn: vault`, `sign` and NO encryption key', async () => {
+  const record = await vault.members()
+  const comm = (record.members || []).find((m) => m.cn === 'vault')
+  assert.ok(comm, 'the vault put its communication key in its own record')
+  assert.deepEqual(comm.caps, ['sign'], 'signs only: does not read, store or seal')
   // ESTO es la garantía de fondo: sin `encPub` no hay a dónde envolver. Un sobre se cierra
   // contra una pública de CIFRADO, y esta llave no tiene ninguna — es un par de FIRMA.
-  assert.equal(comm.encPub ?? null, null, 'no tiene llave de cifrado: no hay a dónde envolverle nada')
+  assert.equal(comm.encPub ?? null, null, 'it has no encryption key: there is nothing to wrap to')
 })
 
-scenario('un cajón llamado `vault` NO le envuelve nada a la llave de comunicación', async () => {
-  const acta = await vault.members()
-  const comm = (acta.members || []).find((m) => m.cn === 'vault')
+scenario('a drawer named `vault` wraps NOTHING for the communication key', async () => {
+  const record = await vault.members()
+  const comm = (record.members || []).find((m) => m.cn === 'vault')
 
   // Se abre el almacén de secretos con el mismo códec de la máquina y se miran TODAS las
   // envolturas de todos los cajones, uno por uno.
@@ -176,7 +176,7 @@ scenario('un cajón llamado `vault` NO le envuelve nada a la llave de comunicaci
   const store = JSON.parse(atRest.decryptText(raw, atRest.machineKey(pdir)))
 
   const drawers = { ...(store.ns || {}), ...(store.dev || {}) }
-  assert.ok(Object.keys(drawers).length, 'hay drawers que mirar')
+  assert.ok(Object.keys(drawers).length, 'there are drawers to inspect')
 
   const recipients = new Set()
   for (const drawer of Object.values(drawers)) {
@@ -186,14 +186,14 @@ scenario('un cajón llamado `vault` NO le envuelve nada a la llave de comunicaci
   }
   log(`  drawers: ${Object.keys(drawers).join(', ')} · recipients: ${recipients.size}`)
   assert.ok(!recipients.has(comm.pub),
-    'la llave de comunicación recibió una envoltura: con ella se leerían secretos con el perfil CERRADO')
+    'the communication key received a wrap: with it secrets could be read with the profile LOCKED')
 })
 
 /**
  * LO QUE YA ESTABA ESCRITO también se sella. Cifrar solo lo nuevo deja el disco en claro
  * durante meses: la bitácora de una bóveda que lleva un año andando no se reescribe sola.
  */
-scenario('una bitácora vieja EN CLARO queda sellada al arrancar', async () => {
+scenario('an old PLAINTEXT log gets sealed on startup', async () => {
   const pdir = path.join(vault.dir, 'p', fs.readdirSync(path.join(vault.dir, 'p'))[0])
   const f = path.join(pdir, 'activity.log')
 
@@ -207,13 +207,13 @@ scenario('una bitácora vieja EN CLARO queda sellada al arrancar', async () => {
 
   const lines = fs.readFileSync(f, 'utf8').split('\n').filter(Boolean)
   const plaintext = lines.filter((l) => !l.startsWith(MAGIC))
-  assert.deepEqual(plaintext, [], 'quedaron líneas en claro: ' + plaintext.length)
-  assert.equal(fs.statSync(f).mode & 0o077, 0, 'y ya no la puede leer otro usuario')
+  assert.deepEqual(plaintext, [], 'plaintext lines left: ' + plaintext.length)
+  assert.equal(fs.statSync(f).mode & 0o077, 0, 'and no other user can read it anymore')
 
   // Y se sigue pudiendo leer: convertir no puede ser perder.
   const atRest = atRestFor(pdir)
   const opened = lines.map((l) => JSON.parse(atRest.decrypt(l)))
-  assert.ok(opened.some((e) => e.device === 'AA00-BB11'), 'la línea vieja sigue ahí')
+  assert.ok(opened.some((e) => e.device === 'AA00-BB11'), 'the old line is still there')
 })
 
 const ok = await runScenarios()

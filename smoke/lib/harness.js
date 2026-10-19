@@ -84,24 +84,24 @@ export async function startProxy ({ log = () => {} } = {}) {
  * local. Devuelve helpers para hablarle por el mismo channel que usa la CLI: archivos de
  * petición + señales (así el smoke ejercita el camino real, no una API interna).
  */
-export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, dir: dirDado = null, docker = null } = {}) {
-  const dir = dirDado || tmpDir(name)
+export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, dir: givenDir = null, docker = null } = {}) {
+  const dir = givenDir || tmpDir(name)
   const lines = []
   // El proceso se guarda en una caja para poder REEMPLAZARLO: `restart()` levanta otro
   // sobre los mismos datos, que es como se prueba lo que la bóveda hace AL ARRANCAR.
   let child = null
-  let contenedor = null
-  let lanzadoEn = 0
-  const lanzar = () => {
-    lanzadoEn = Date.now()
+  let container = null
+  let launchedAt = 0
+  const launch = () => {
+    launchedAt = Date.now()
     if (docker) {
       // EN UN CONTENEDOR, con `docker = { machineId }`: el archivo que se monta como
       // `/etc/machine-id`. Es lo que hace que los datos abran en un contenedor NUEVO: sin
       // él, el material de máquina cae al hostname, que es el id del contenedor
       // (`dotrino-vault/lib/src/kek.js`, `assertSameMachine`). `docker run` reenvía las
       // señales, así que SIGUSR1/SIGUSR2 al proceso del CLI llegan a la bóveda.
-      contenedor = `smoke-${name}-${Date.now().toString(36)}`
-      child = track(spawn('docker', ['run', '--rm', '--name', contenedor, '--network', 'host',
+      container = `smoke-${name}-${Date.now().toString(36)}`
+      child = track(spawn('docker', ['run', '--rm', '--name', container, '--network', 'host',
         '--user', `${process.getuid()}:${process.getgid()}`,
         '-v', `${ROOT}:/eco:ro`, '-v', `${dir}:/data`, '-v', `${docker.machineId}:/etc/machine-id:ro`,
         // Las dos rutas que lee la bóveda (`atrest.js`), como en un Debian con dbus: así el
@@ -110,7 +110,7 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
         '-e', 'HOME=/data', '-e', 'DOTRINO_VAULT_DIR=/data', '-e', `PROXY_URL=${proxyUrl}`,
         '-w', '/eco/dotrino-vault', docker.image || 'node:22-bookworm-slim', 'node', 'bin/dotrino-vaultd.js'
       ], { stdio: ['ignore', 'pipe', 'pipe'] }), name)
-      contenedores.push(contenedor)
+      containers.push(container)
     } else {
       child = track(spawn(process.execPath, ['bin/dotrino-vaultd.js'], {
         cwd: VAULT_DIR,
@@ -121,7 +121,7 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
     child.stdout.on('data', (b) => { lines.push(String(b)); log(`[${name}] ` + String(b).trim()) })
     child.stderr.on('data', (b) => { lines.push(String(b)); log(`[${name}!] ` + String(b).trim()) })
   }
-  lanzar()
+  launch()
 
   const stateFile = path.join(dir, 'state.json')
   // EL CANAL LOCAL VA CIFRADO EN REPOSO (dotrino-vault `src/ipc.js`, desde 0.89): por él
@@ -136,7 +136,7 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
     state = readJson(stateFile)
     // Sobre un directorio que ya tenía datos (una copia restaurada), el `state.json` que hay
     // es el de la bóveda ANTERIOR: solo vale el que escribió esta, que arranca después.
-    if (state?.iss && Date.parse(state.startedAt || 0) >= lanzadoEn - 2000) break
+    if (state?.iss && Date.parse(state.startedAt || 0) >= launchedAt - 2000) break
     if (child.exitCode != null) break
     state = null
     await sleep(200)
@@ -149,7 +149,7 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
     if (child.exitCode != null) state = null
   }
   if (!state?.iss) {
-    if (contenedor) spawnSync('docker', ['rm', '-f', contenedor], { stdio: 'ignore' })
+    if (container) spawnSync('docker', ['rm', '-f', container], { stdio: 'ignore' })
     throw Object.assign(new Error(`vault ${name} did not start:\n` + lines.join('')), { lines })
   }
 
@@ -166,7 +166,7 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
       try { child.kill('SIGTERM') } catch (_) {}
       const t = Date.now() + timeoutMs
       while (Date.now() < t && child.exitCode == null && child.signalCode == null) await sleep(100)
-      if (contenedor) spawnSync('docker', ['rm', '-f', contenedor], { stdio: 'ignore' })
+      if (container) spawnSync('docker', ['rm', '-f', container], { stdio: 'ignore' })
       else try { child.kill('SIGKILL') } catch (_) {}
     },
     /**
@@ -175,13 +175,13 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
      * candado se suelte: dos bóvedas sobre un directorio no arrancan, y con razón.
      */
     async restart (timeoutMs = 25000) {
-      const viejo = child
-      try { viejo.kill('SIGTERM') } catch (_) {}
+      const old = child
+      try { old.kill('SIGTERM') } catch (_) {}
       const t0 = Date.now() + 8000
-      while (Date.now() < t0 && viejo.exitCode == null && viejo.signalCode == null) await sleep(100)
-      try { viejo.kill('SIGKILL') } catch (_) {}
+      while (Date.now() < t0 && old.exitCode == null && old.signalCode == null) await sleep(100)
+      try { old.kill('SIGKILL') } catch (_) {}
       await sleep(600)
-      lanzar()
+      launch()
       const t = Date.now() + timeoutMs
       while (Date.now() < t) {
         const s = readJson(stateFile)
@@ -224,13 +224,13 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
      * un prompt, pero lo que llega al daemon es esto.
      */
     async profileOp (op, extra = {}, timeoutMs = 15000) {
-      const salida = path.join(dir, 'profiles-list.json')
-      try { fs.rmSync(salida, { force: true }) } catch (_) {}
+      const outFile = path.join(dir, 'profiles-list.json')
+      try { fs.rmSync(outFile, { force: true }) } catch (_) {}
       writeReq('profile-request.json', { op, ...extra })
       signal('SIGUSR2')
       const t = Date.now() + timeoutMs
       while (Date.now() < t) {
-        const d = readJson(salida)
+        const d = readJson(outFile)
         if (d?.at) return d
         await sleep(120)
       }
@@ -275,14 +275,14 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
      */
     /** Una orden de `dotrino-vault logins` por su canal: `list`, `close`, `remove`… */
     async logins (op, extra = {}) {
-      const salida = path.join(dir, 'logins-list.json')
-      try { fs.rmSync(salida, { force: true }) } catch (_) {}
+      const outFile = path.join(dir, 'logins-list.json')
+      try { fs.rmSync(outFile, { force: true }) } catch (_) {}
       const id = `smoke-${op}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
       writeReq('logins-request.json', { op, id, ...extra })
       signal('SIGUSR2')
       const t = Date.now() + 15000
       while (Date.now() < t) {
-        const d = readJson(salida)
+        const d = readJson(outFile)
         if (d?.at && (!d.req || d.req === id)) {
           if (d.ok === false) throw Object.assign(new Error(`logins ${op}: ${d.error}`), { code: d.code })
           return d
@@ -292,17 +292,17 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
       throw new Error(`the vault did not answer «logins ${op}»`)
     },
     async loginsAdd (user, password, { label = 'equipo prestado', caps = ['sign', 'read', 'store'] } = {}) {
-      const pedir = (op, extra) => this.logins(op, extra)
+      const ask = (op, extra) => this.logins(op, extra)
       const { client: opaque } = await import(path.join(VAULT_DIR, 'node_modules/@dotrino/opaque/src/index.js'))
       const { makeDeviceKey, makeDeviceEncKey } = await import(path.join(VAULT_DIR, 'node_modules/@dotrino/identity/vault/capabilities.js'))
       const { sealDeviceKeys, loginAddress } = await import(path.join(VAULT_DIR, 'lib/src/passwordLogins.js'))
       const start = opaque.registrationStart({ password })
-      const begun = await pedir('register-begin', { user, request: start.request })
+      const begun = await ask('register-begin', { user, request: start.request })
       const fin = opaque.registrationFinish({ state: start.state, response: begun.response, password })
       const device = await makeDeviceKey({ label })
       const enc = await makeDeviceEncKey()
       const blob = await sealDeviceKeys(fin.exportKey, { sign: device.privateJwk, enc: enc.privateJwk })
-      const r = await pedir('register-finish', { user, upload: fin.upload, pub: device.publickey, encPub: enc.publickey, label, blob, caps })
+      const r = await ask('register-finish', { user, upload: fin.upload, pub: device.publickey, encPub: enc.publickey, label, blob, caps })
       return { address: loginAddress(user, r.fingerprint), deviceId: r.deviceId, caps: r.caps, pub: device.publickey }
     },
     /** `dotrino-vault secret set <ns> <CLAVE> <valor> [--public]`. */
@@ -340,13 +340,13 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
       // `profiles-list.json`, no `profiles.json`: el segundo es el REGISTRO de perfiles
       // (cifrado en reposo) y el primero es donde el daemon deja su respuesta.
       const f = path.join(dir, 'profiles-list.json')
-      const antes = readJson(f)?.at || 0
+      const before = readJson(f)?.at || 0
       writeReq('profile-request.json', { op, ...extra })
       signal('SIGUSR2')
       const t = Date.now() + timeoutMs
       while (Date.now() < t) {
         const d = readJson(f)
-        if (d?.at && d.at !== antes) return d
+        if (d?.at && d.at !== before) return d
         await sleep(120)
       }
       throw new Error(`the daemon did not answer «${op}»`)
@@ -385,7 +385,7 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
      * máquina, así que se abre con el mismo módulo del vault — que es exactamente lo que
      * puede hacer quien esté sentado aquí, y nadie más.
      */
-    secretos () {
+    secrets () {
       const pdir = path.join(dir, 'p', fs.readdirSync(path.join(dir, 'p'))[0])
       const f = path.join(pdir, 'secrets.json')
       if (!fs.existsSync(f)) return null
@@ -393,7 +393,7 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
       return JSON.parse(atRest.isEncrypted(raw) ? atRest.decryptText(raw, atRest.machineKey(pdir)) : raw)
     },
     /** Los hilos del almacén de la bóveda (`threads.json`, cifrado en reposo), ya abiertos. */
-    hilos () {
+    threads () {
       const pdir = path.join(dir, 'p', fs.readdirSync(path.join(dir, 'p'))[0])
       const f = path.join(pdir, 'threads.json')
       if (!fs.existsSync(f)) return null
@@ -401,7 +401,7 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
       return JSON.parse(atRest.isEncrypted(raw) ? atRest.decryptText(raw, atRest.machineKey(pdir)) : raw)
     },
     /** El archivo del cajón EN CRUDO (cifrado). Para buscar si un valor se coló tal cual. */
-    secretosCrudos () {
+    rawSecrets () {
       const pdir = path.join(dir, 'p', fs.readdirSync(path.join(dir, 'p'))[0])
       const f = path.join(pdir, 'secrets.json')
       return fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : ''
@@ -415,9 +415,9 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
  * poder probarlos con un navegador de verdad sin salir de la máquina. Sin dependencias:
  * son cuatro tipos de archivo y una regla de respaldo para las rutas de la SPA.
  */
-export async function serveStatic (raiz, { spa = false } = {}) {
+export async function serveStatic (root, { spa = false } = {}) {
   const http = await import('node:http')
-  const TIPOS = {
+  const TYPES = {
     '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
     '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
     '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml',
@@ -426,21 +426,21 @@ export async function serveStatic (raiz, { spa = false } = {}) {
   const port = await freePort()
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x')
-    let f = path.join(raiz, decodeURIComponent(url.pathname))
-    if (!f.startsWith(raiz)) { res.writeHead(403).end(); return }
+    let f = path.join(root, decodeURIComponent(url.pathname))
+    if (!f.startsWith(root)) { res.writeHead(403).end(); return }
     if (fs.existsSync(f) && fs.statSync(f).isDirectory()) f = path.join(f, 'index.html')
-    if (!fs.existsSync(f) && spa) f = path.join(raiz, 'index.html')
-    if (!fs.existsSync(f)) { res.writeHead(404).end('no está'); return }
-    res.writeHead(200, { 'content-type': TIPOS[path.extname(f)] || 'application/octet-stream' })
+    if (!fs.existsSync(f) && spa) f = path.join(root, 'index.html')
+    if (!fs.existsSync(f)) { res.writeHead(404).end('not found'); return }
+    res.writeHead(200, { 'content-type': TYPES[path.extname(f)] || 'application/octet-stream' })
     fs.createReadStream(f).pipe(res)
   })
   await new Promise((r) => server.listen(port, '127.0.0.1', r))
-  servidores.push(server)
+  servers.push(server)
   return { url: `http://127.0.0.1:${port}`, port, server }
 }
 
-const servidores = []
-const contenedores = []
+const servers = []
+const containers = []
 
 /** Mata todo lo levantado y borra los directorios temporales. */
 export async function teardown () {
@@ -450,32 +450,32 @@ export async function teardown () {
   procs.length = 0
   for (const d of dirs) { try { fs.rmSync(d, { recursive: true, force: true }) } catch (_) {} }
   dirs.length = 0
-  for (const s of servidores.splice(0)) { try { s.close() } catch (_) {} }
-  for (const c of contenedores.splice(0)) spawnSync('docker', ['rm', '-f', c], { stdio: 'ignore' })
+  for (const s of servers.splice(0)) { try { s.close() } catch (_) {} }
+  for (const c of containers.splice(0)) spawnSync('docker', ['rm', '-f', c], { stdio: 'ignore' })
 }
 
 // ----- runner mínimo (sin dependencias: esto tiene que correr en cualquier lado) -----
 
-const casos = []
-export const scenario = (nombre, fn) => casos.push({ nombre, fn })
+const cases = []
+export const scenario = (name, fn) => cases.push({ name, fn })
 
 export async function runScenarios () {
-  let ok = 0; const fallos = []
-  for (const c of casos) {
+  let ok = 0; const failures = []
+  for (const c of cases) {
     const t0 = Date.now()
     try {
       await c.fn()
       ok++
-      console.log(`  ✔ ${c.nombre} (${Date.now() - t0} ms)`)
+      console.log(`  ✔ ${c.name} (${Date.now() - t0} ms)`)
     } catch (e) {
-      fallos.push({ nombre: c.nombre, error: e })
-      console.log(`  ✖ ${c.nombre}\n      ${e?.message || e}`)
+      failures.push({ name: c.name, error: e })
+      console.log(`  ✖ ${c.name}\n      ${e?.message || e}`)
     }
   }
-  console.log(`\n  ${ok}/${casos.length} scenarios`)
-  if (fallos.length) {
+  console.log(`\n  ${ok}/${cases.length} scenarios`)
+  if (failures.length) {
     console.log('\nDetails:')
-    for (const f of fallos) console.log(`\n[${f.nombre}]\n`, f.error?.stack || f.error)
+    for (const f of failures) console.log(`\n[${f.name}]\n`, f.error?.stack || f.error)
   }
-  return fallos.length === 0
+  return failures.length === 0
 }

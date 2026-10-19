@@ -16,46 +16,36 @@
  * pedir. Así que el teléfono timbraba otra vez. El dueño, textual: «sigo aprobando y
  * aprobando».
  *
- *   node smoke/approvals.mjs [--verbose]
+ *   npm run smoke:approvals  (o: node smoke/approvals.mjs [--verbose])
  */
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { scenario, runScenarios, startProxy, startVault, teardown } from './lib/harness.js'
+import { waitFor } from './lib/wait.js'
 
 const VERBOSE = process.argv.includes('--verbose')
 const log = (m) => { if (VERBOSE) console.log(m) }
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-const FRASE = 'cuatro palabras al azar aqui'
+const PASSPHRASE = 'cuatro palabras al azar aqui'
 
 let proxy = null
 let vault = null
-const estado = {}
-
-async function esperar (fn, { timeoutMs = 25000, que = 'la condición' } = {}) {
-  const t = Date.now() + timeoutMs
-  while (Date.now() < t) {
-    const v = await fn()
-    if (v) return v
-    await sleep(200)
-  }
-  throw new Error('timed out waiting for ' + que)
-}
+const state = {}
 
 const tmp = (n) => fs.mkdtempSync(path.join(os.tmpdir(), 'apv-' + n + '-'))
 
-scenario('arranca el ecosistema y se guarda una variable privada', async () => {
+scenario('the ecosystem starts and a private variable is stored', async () => {
   proxy = await startProxy({ log })
-  vault = await startVault({ proxyUrl: proxy.url, name: 'boveda', log })
+  vault = await startVault({ proxyUrl: proxy.url, name: 'vault', log })
   // La variable entra ANTES de que exista el servicio: es el caso que rompía, porque su
   // envoltura hay que hacérsela después, y eso solo se puede con la bóveda abierta.
   await vault.setSecret('demo', 'TOKEN', 'valor-secreto', false)
-  estado.dirServicio = tmp('servicio')
-  estado.dirAprobador = tmp('aprobador')
+  state.serviceDir = tmp('service')
+  state.approverDir = tmp('approver')
 })
 
-scenario('se enrolan el SERVICIO y el APROBADOR, con la bóveda abierta', async () => {
+scenario('the SERVICE and the APPROVER enroll, with the vault open', async () => {
   const { enrollService, enrollWithVault } = await import('../../dotrino-vault/lib/src/service.js')
 
   // El servicio del cajón `demo`.
@@ -63,42 +53,42 @@ scenario('se enrolan el SERVICIO y el APROBADOR, con la bóveda abierta', async 
   // `onCode` ya aprueba en cuanto el aparato enseña su código, así que NO se espera a
   // `waitPending`: para cuando miraras, la petición ya está consumida y esperas a algo que
   // no va a volver a pasar.
-  estado.servicio = await enrollService({
-    qr, ns: 'demo', dir: estado.dirServicio, label: 'demo', onCode: ({ code }) => vault.approve(code)
+  state.service = await enrollService({
+    qr, ns: 'demo', dir: state.serviceDir, label: 'demo', onCode: ({ code }) => vault.approve(code)
   })
-  estado.servicioPub = estado.servicio.device.publickey
+  state.servicePub = state.service.device.publickey
 
   // El aparato que aprueba: un aparato tuyo, sin cajón propio.
   const qr2 = await vault.pair({ label: 'telefono' })
-  estado.aprobador = await enrollWithVault({ qr: qr2, label: 'telefono', onCode: ({ code }) => vault.approve(code) })
-  estado.aprobadorPub = estado.aprobador.device.publickey
+  state.approver = await enrollWithVault({ qr: qr2, label: 'telefono', onCode: ({ code }) => vault.approve(code) })
+  state.approverPub = state.approver.device.publickey
 
   const acta = await vault.members()
-  const s = (acta.members || []).find((m) => m.pub === estado.servicioPub)
-  assert.equal(s?.cn, 'demo', 'el servicio entra en el acta con su cajón')
+  const s = (acta.members || []).find((m) => m.pub === state.servicePub)
+  assert.equal(s?.cn, 'demo', 'the service enters the record with its drawer')
   assert.ok(!(s.caps || []).includes('unattended'),
-    'y SIN llevarse las claves solo: pedir permiso es el defecto, no una marca que alguien recuerde poner')
+    'and WITHOUT taking the keys on its own: asking is the default, not a flag someone has to remember')
 })
 
-scenario('el aparato que aprueba recibe el permiso `aprueba`', async () => {
+scenario('the approving device gets the `approve` permission', async () => {
   const acta = await vault.members()
-  const m = (acta.members || []).find((x) => x.pub === estado.aprobadorPub)
-  await vault.caps(estado.aprobadorPub, [...new Set([...(m?.caps || []), 'approve'])])
-  const despues = await vault.members()
-  const y = (despues.members || []).find((x) => x.pub === estado.aprobadorPub)
-  assert.ok((y.caps || []).includes('approve'), 'ya puede aprobar')
+  const m = (acta.members || []).find((x) => x.pub === state.approverPub)
+  await vault.caps(state.approverPub, [...new Set([...(m?.caps || []), 'approve'])])
+  const after = await vault.members()
+  const y = (after.members || []).find((x) => x.pub === state.approverPub)
+  assert.ok((y.caps || []).includes('approve'), 'it can approve now')
 
   // EL PERMISO ESTÁ EN EL ACTA, PERO EL PAPEL ES DE ANTES. Un cert se emite con lo que el
   // acta decía entonces, así que conceder `aprueba` no basta: hay que pedir uno nuevo. En
   // el teléfono pasa solo (`certDesfasadoDelActa` → renovar al abrir la identidad); aquí,
   // que es un enlace headless, se hace a mano — y es parte de lo que se quiere probar.
   const { requestRenew } = await import('../../dotrino-identity/vault/remote.js')
-  const nuevo = await requestRenew({
+  const renewed = await requestRenew({
     master: vault.iss, proxy: proxy.url,
-    device: estado.aprobador.device, cert: estado.aprobador.cert
+    device: state.approver.device, cert: state.approver.cert
   })
-  assert.ok((nuevo?.cert?.scope || []).includes('vault:approve'), 'el papel nuevo ya lo lleva')
-  estado.aprobador = { ...estado.aprobador, cert: nuevo.cert }
+  assert.ok((renewed?.cert?.scope || []).includes('vault:approve'), 'the new certificate carries it')
+  state.approver = { ...state.approver, cert: renewed.cert }
 })
 
 /**
@@ -109,81 +99,81 @@ scenario('el aparato que aprueba recibe el permiso `aprueba`', async () => {
  * servicio existiera, así que su envoltura hay que hacérsela después. Si falta, el servicio
  * recibe un paquete que no puede abrir — y eso es exactamente lo que se veía en producción.
  */
-scenario('el servicio abre lo que se escribió ANTES de que él existiera', async () => {
+scenario('the service opens what was written BEFORE it existed', async () => {
   const { fetchSecrets } = await import('../../dotrino-vault/lib/src/service.js')
   // Todavía con la bóveda abierta y con `unattended`, para medir SOLO la envoltura.
   const acta = await vault.members()
-  const m = (acta.members || []).find((x) => x.pub === estado.servicioPub)
-  await vault.caps(estado.servicioPub, [...new Set([...(m?.caps || []), 'unattended'])])
-  const s = await fetchSecrets({ dir: estado.dirServicio, ns: 'demo' })
-  assert.equal(s.TOKEN, 'valor-secreto', 'la envoltura se le hizo al registrar su llave de cifrado')
+  const m = (acta.members || []).find((x) => x.pub === state.servicePub)
+  await vault.caps(state.servicePub, [...new Set([...(m?.caps || []), 'unattended'])])
+  const s = await fetchSecrets({ dir: state.serviceDir, ns: 'demo' })
+  assert.equal(s.TOKEN, 'valor-secreto', 'the wrapping was made when its encryption key was registered')
 
   // Y se le vuelve a quitar: el resto de la caja prueba el camino con aprobación.
-  const otra = await vault.members()
-  const m2 = (otra.members || []).find((x) => x.pub === estado.servicioPub)
-  await vault.caps(estado.servicioPub, (m2?.caps || []).filter((c) => c !== 'unattended'))
+  const again = await vault.members()
+  const m2 = (again.members || []).find((x) => x.pub === state.servicePub)
+  await vault.caps(state.servicePub, (m2?.caps || []).filter((c) => c !== 'unattended'))
 })
 
-scenario('se pone contraseña y se CIERRA la bóveda', async () => {
-  const r = await vault.profile('password-set', { password: FRASE })
-  assert.ok(!r.error, 'la contraseña se guarda: ' + (r.error || ''))
+scenario('a password is set and the vault is LOCKED', async () => {
+  const r = await vault.profile('password-set', { password: PASSPHRASE })
+  assert.ok(!r.error, 'the password is stored: ' + (r.error || ''))
   const l = await vault.profile('lock')
-  assert.ok(!l.error, 'y se cierra: ' + (l.error || ''))
+  assert.ok(!l.error, 'and it locks: ' + (l.error || ''))
 })
 
-scenario('CERRADA: el pedido llega al que aprueba — el timbre NO necesita la maestra', async () => {
+scenario('LOCKED: the request reaches the approver — the doorbell does NOT need the master key', async () => {
   const { fetchSecrets } = await import('../../dotrino-vault/lib/src/service.js')
 
   // El servicio pide. Con la bóveda cerrada y sin `unattended`, esto tiene que quedar
   // pendiente Y avisar a quien aprueba.
-  let pendiente = null
-  const pidiendo = fetchSecrets({
-    dir: estado.dirServicio, ns: 'demo',
-    onPending: (p) => { pendiente = p; log('[service] pending ' + p.id) }
+  let pending = null
+  const asking = fetchSecrets({
+    dir: state.serviceDir, ns: 'demo',
+    onPending: (p) => { pending = p; log('[service] pending ' + p.id) }
   }).then((v) => ({ v }), (e) => ({ e }))
 
-  await esperar(() => pendiente, { que: 'que la bóveda conteste «pendiente»' })
+  await waitFor(() => pending, { timeoutMs: 25000, what: 'the vault to answer «pending»' })
 
   // LO QUE SE PRUEBA: el aviso SALIÓ. Antes reventaba con «vault locked» antes de mandar
   // nada, así que aquí no había ni línea de salida ni nada encolado para el teléfono.
-  const salida = vault.log()
-  assert.doesNotMatch(salida, /could not notify approvers/,
-    'avisar a quien aprueba NO puede necesitar la maestra: cerrada es el estado normal')
-  assert.match(salida, /rang 1 approver/, 'y consta que se timbró a uno')
+  const output = vault.log()
+  assert.doesNotMatch(output, /could not notify approvers/,
+    'notifying the approver must NOT need the master key: locked is the normal state')
+  assert.match(output, /rang 1 approver/, 'and it is logged that one approver was rung')
 
-  estado.pendiente = pendiente
-  estado.pidiendo = pidiendo
+  state.pending = pending
+  state.asking = asking
 })
 
-scenario('el que aprueba dice que sí, y el servicio abre lo que le llega', async () => {
+scenario('the approver says yes, and the service opens what it receives', async () => {
   const { requestApproval } = await import('../../dotrino-identity/vault/remote.js')
-  const { device, cert } = estado.aprobador
-  const comun = { master: vault.iss, proxy: proxy.url, device, cert }
+  const { device, cert } = state.approver
+  const common = { master: vault.iss, proxy: proxy.url, device, cert }
 
-  const lista = await requestApproval({ ...comun, op: 'approvals' })
-  assert.equal(lista.items.length, 1, 'el teléfono ve UN pedido')
-  assert.equal(lista.items[0].ns, 'demo')
+  const list = await requestApproval({ ...common, op: 'approvals' })
+  assert.equal(list.items.length, 1, 'the phone sees ONE request')
+  assert.equal(list.items[0].ns, 'demo')
 
-  await requestApproval({ ...comun, op: 'approve', id: lista.items[0].id })
+  await requestApproval({ ...common, op: 'approve', id: list.items[0].id })
 
-  const r = await estado.pidiendo
+  const r = await state.asking
   // Y aquí es donde se caía: llegaba, pero sin envoltura no se podía abrir. La envoltura la
   // hizo la bóveda al enrolarlo, con ella abierta, que es el único momento en que puede.
-  assert.ok(!r.e, 'el servicio recibe y ABRE lo aprobado: ' + (r.e?.message || ''))
-  assert.equal(r.v.TOKEN, 'valor-secreto', 'y es el valor que guardó el dueño')
+  assert.ok(!r.e, 'the service receives and OPENS what was approved: ' + (r.e?.message || ''))
+  assert.equal(r.v.TOKEN, 'valor-secreto', 'and it is the value the owner stored')
 })
 
-scenario('un aparato SIN envoltura corta y dice qué hacer: no vuelve a hacer timbrar', async () => {
+scenario('a device WITHOUT a wrapping stops and says what to do: it does not ring again', async () => {
   const { isFinal } = await import('../../dotrino-vault/lib/src/service.js')
   // La regla, aparte: reintentar un cajón sin envoltura solo sirve para que el teléfono
   // timbre otra vez y el dueño apruebe otra vez. No lo arregla ninguna aprobación.
   assert.equal(isFinal({ code: 'no-wrapping', message: 'x' }), true)
-  assert.equal(isFinal(new Error('the vault did not reply')), false, 'lo transitorio sí se reintenta')
+  assert.equal(isFinal(new Error('the vault did not reply')), false, 'transient errors are retried')
 })
 
 runScenarios().finally(async () => {
   await teardown()
-  for (const d of [estado.dirServicio, estado.dirAprobador]) {
+  for (const d of [state.serviceDir, state.approverDir]) {
     if (d) try { fs.rmSync(d, { recursive: true, force: true }) } catch (_) {}
   }
 })

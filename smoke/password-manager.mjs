@@ -10,7 +10,7 @@
  * haciendo de bóveda, y el proxio entre las dos. Todo en local: no toca producción y no
  * necesita credenciales.
  *
- *   npm run smoke:gestor
+ *   npm run smoke:password-manager
  *   node smoke/password-manager.mjs --verbose      (con los logs y sin ocultar el navegador)
  *
  * Requiere:  cd dotrino-vault/web && npm run build
@@ -30,45 +30,45 @@ const VERBOSE = process.argv.includes('--verbose')
 const LOGS = VERBOSE || process.argv.includes('--logs')
 const log = (m) => { if (LOGS) console.log(m) }
 
-const CONSOLA = path.join(ROOT, 'dotrino-vault/web/dist')
+const CONSOLE_DIST = path.join(ROOT, 'dotrino-vault/web/dist')
 const IFRAME = path.join(ROOT, 'dotrino-identity/vault')
 const EXT = path.join(ROOT, 'dotrino-passmanager/extension')
-const SITIO = path.join(ROOT, 'dotrino-passmanager/web/test')
+const SITE_DIR = path.join(ROOT, 'dotrino-passmanager/web/test')
 
 let proxy = null
-let webConsola = null
+let webConsole = null
 let webIframe = null
-let webSitio = null
-let contexto = null
-let perfilDir = null
+let webSite = null
+let context = null
+let profileDir = null
 let extId = null
 
 /** El iframe de identidad de disco, con el proxio de aquí dentro. */
 const iframeUrl = () => `${webIframe.url}/?proxy=${encodeURIComponent(proxy.url)}`
 
 /** La consola en modo bóveda: sin otra fuera, `/vault` enciende su propio mostrador. */
-async function abrirConsola () {
-  const page = await contexto.newPage()
+async function openConsole () {
+  const page = await context.newPage()
   // El aviso se manda por el service worker. Aquí se anota en vez de enseñarse: lo que
   // se comprueba es que la bóveda avisa, no el aspecto del globo del sistema.
   await page.addInitScript(() => {
-    window.__avisos = []
-    const esperar = () => navigator.serviceWorker?.ready?.then((reg) => {
-      if (!reg || reg.__espiado) return
-      reg.__espiado = true
+    window.__notices = []
+    const hookNotifications = () => navigator.serviceWorker?.ready?.then((reg) => {
+      if (!reg || reg.__spied) return
+      reg.__spied = true
       const real = reg.showNotification?.bind(reg)
       void real
-      reg.showNotification = (titulo, opts) => {
-        window.__avisos.push({ titulo, tag: opts?.tag, body: opts?.body })
+      reg.showNotification = (title, opts) => {
+        window.__notices.push({ title, tag: opts?.tag, body: opts?.body })
         return Promise.resolve()
       }
     }).catch(() => {})
-    esperar()
-    window.addEventListener('load', esperar)
+    hookNotifications()
+    window.addEventListener('load', hookNotifications)
   })
-  page.on('console', (m) => { if (LOGS || m.type() === 'error') console.log('   [consola] ' + m.text()) })
+  page.on('console', (m) => { if (LOGS || m.type() === 'error') console.log('   [console] ' + m.text()) })
   page.on('pageerror', (e) => console.log('   [console!] ' + e.message))
-  await page.goto(`${webConsola.url}/vault?vault=${encodeURIComponent(iframeUrl())}&proxy=${encodeURIComponent(proxy.url)}`)
+  await page.goto(`${webConsole.url}/vault?vault=${encodeURIComponent(iframeUrl())}&proxy=${encodeURIComponent(proxy.url)}`)
   await page.waitForSelector('[data-testid="vault-at"][data-where="self"]', { timeout: 40000 })
   // El mostrador tiene que estar ATENDIENDO, no solo declarado: el botón que da el código
   // solo se habilita con la conexión al proxio en marcha.
@@ -76,8 +76,8 @@ async function abrirConsola () {
   return page
 }
 
-async function abrirPopup () {
-  const page = await contexto.newPage()
+async function openPopup () {
+  const page = await context.newPage()
   page.on('console', (m) => { if (LOGS || m.type() === 'error') console.log('   [popup] ' + m.text()) })
   page.on('pageerror', (e) => console.log('   [popup!] ' + e.message))
   await page.goto(`chrome-extension://${extId}/src/popup.html`)
@@ -85,50 +85,50 @@ async function abrirPopup () {
   return page
 }
 
-const pedir = (page, op, payload) => page.evaluate(([op, payload]) => new Promise((r) =>
+const ask = (page, op, payload) => page.evaluate(([op, payload]) => new Promise((r) =>
   chrome.runtime.sendMessage({ op, payload }, r)), [op, payload])
 
 // Lo que se comparte entre escenarios: emparejar una vez y usarlo después.
-const estado = { consola: null, popup: null }
+const state = { consolePage: null, popup: null }
 
-scenario('la extensión se enlaza a la bóveda de la pestaña', async () => {
-  const consola = await abrirConsola()
-  estado.consola = consola
+scenario('the extension links to the tab vault', async () => {
+  const consolePage = await openConsole()
+  state.consolePage = consolePage
 
   // Los aparatos que ya hay, para reconocer al nuevo después.
-  const antes = new Set(await consola.locator('[data-member]').evaluateAll(
+  const before = new Set(await consolePage.locator('[data-member]').evaluateAll(
     (ns) => ns.map((n) => n.getAttribute('data-member'))))
 
   // 1. La bóveda emite la invitación. Es la misma cadena que codifica el QR.
-  await consola.locator('[data-testid="self-pair"]').click()
-  await consola.waitForSelector('[data-testid="self-invite"]', { timeout: 30000 })
-  const invitacion = (await consola.locator('[data-testid="self-invite"] code.url').innerText()).trim()
-  assert.ok(invitacion.length > 20, 'la bóveda da una invitación: ' + invitacion.slice(0, 40))
+  await consolePage.locator('[data-testid="self-pair"]').click()
+  await consolePage.waitForSelector('[data-testid="self-invite"]', { timeout: 30000 })
+  const invite = (await consolePage.locator('[data-testid="self-invite"] code.url').innerText()).trim()
+  assert.ok(invite.length > 20, 'the vault gives an invite: ' + invite.slice(0, 40))
 
   // 2. La extensión la pega. Se llega por «añadir un perfil» → «conectar una que ya tengo»:
   //    enlazar SUMA una bóveda, no reemplaza la que ya hay (§3.3).
-  const popup = await abrirPopup()
-  estado.popup = popup
+  const popup = await openPopup()
+  state.popup = popup
   await popup.locator('[data-testid="profile-add"]').click()
   await popup.locator('[data-testid="add-linked"]').click()
-  await popup.locator('[data-testid="invite"]').fill(invitacion)
+  await popup.locator('[data-testid="invite"]').fill(invite)
   await popup.locator('[data-testid="pair"]').click()
 
   // 3. La extensión enseña SEIS caracteres. No viajan: la bóveda los aprende porque los
   //    escribe una persona, y por eso aprobar exige tener las dos pantallas delante.
   await popup.waitForSelector('[data-testid="pair-code"]', { timeout: 40000 })
-  const codigo = (await popup.locator('[data-testid="pair-code"]').innerText()).trim()
-  assert.match(codigo, /^[A-Za-z0-9]{4,8}$/, 'el código es corto y se puede teclear: ' + codigo)
+  const code = (await popup.locator('[data-testid="pair-code"]').innerText()).trim()
+  assert.match(code, /^[A-Za-z0-9]{4,8}$/, 'the code is short and typeable: ' + code)
 
   // 4. Y la bóveda ve al aparato esperando, y lo aprueba con ese código.
-  await consola.waitForSelector('[data-testid="self-pending"]', { timeout: 40000 })
-  await consola.locator('[data-testid="self-code"]').fill(codigo)
-  await consola.locator('[data-testid="self-approve"]').click()
+  await consolePage.waitForSelector('[data-testid="self-pending"]', { timeout: 40000 })
+  await consolePage.locator('[data-testid="self-code"]').fill(code)
+  await consolePage.locator('[data-testid="self-approve"]').click()
 
   // 5. El perfil de la extensión pasa a ser una bóveda CONECTADA.
   let st = null
   for (let i = 0; i < 60; i++) {
-    st = (await pedir(popup, 'status'))?.result
+    st = (await ask(popup, 'status'))?.result
     if (st?.profile?.kind === 'linked') break
     await popup.waitForTimeout(1000)
   }
@@ -136,39 +136,39 @@ scenario('la extensión se enlaza a la bóveda de la pestaña', async () => {
     console.log('   [notice] the popup says:',
       JSON.stringify(await popup.locator('.error').allInnerTexts().catch(() => [])))
   }
-  assert.equal(st?.profile?.kind, 'linked', 'el perfil activo vive fuera de la extensión')
-  assert.equal(st.profiles.length, 2, 'y el propio sigue estando: enlazar SUMA')
+  assert.equal(st?.profile?.kind, 'linked', 'the active profile lives outside the extension')
+  assert.equal(st.profiles.length, 2, 'and its own one is still there: linking ADDS')
 
   // 6. Y AHORA EL PERMISO, que es un paso aparte y a propósito: emparejar mete al
   //    aparato en el acta, pero **pedir contraseñas es un permiso suyo** que da el dueño
   //    en la consola. Es lo que dice el mensaje que la extensión enseña si falta: «tu
   //    bóveda todavía no deja que este navegador pida contraseñas».
-  await consola.waitForFunction((ya) => [...document.querySelectorAll('[data-member]')]
-    .some((n) => !ya.includes(n.getAttribute('data-member'))), [...antes], { timeout: 40000 })
-  const nuevo = (await consola.locator('[data-member]').evaluateAll(
+  await consolePage.waitForFunction((ya) => [...document.querySelectorAll('[data-member]')]
+    .some((n) => !ya.includes(n.getAttribute('data-member'))), [...before], { timeout: 40000 })
+  const newcomer = (await consolePage.locator('[data-member]').evaluateAll(
     (ns) => ns.map((n) => n.getAttribute('data-member'))))
-    .find((idm) => !antes.has(idm))
-  assert.ok(nuevo, 'la consola lista al aparato nuevo en el acta')
+    .find((idm) => !before.has(idm))
+  assert.ok(newcomer, 'the console lists the new device in the record')
 
-  await consola.locator(`[data-testid="acc-member-${nuevo}"]`).click()
-  const permiso = consola.locator(`[data-testid="cap-passwords-${nuevo}"]`)
-  await permiso.waitFor({ timeout: 15000 })
-  assert.equal((await permiso.getAttribute('class')).includes('on'), false,
-    'el aparato entra SIN el permiso de contraseñas: emparejar no es autorizar')
-  await permiso.click()
-  await consola.waitForTimeout(1500)
+  await consolePage.locator(`[data-testid="acc-member-${newcomer}"]`).click()
+  const capToggle = consolePage.locator(`[data-testid="cap-passwords-${newcomer}"]`)
+  await capToggle.waitFor({ timeout: 15000 })
+  assert.equal((await capToggle.getAttribute('class')).includes('on'), false,
+    'the device joins WITHOUT the passwords permission: pairing is not authorizing')
+  await capToggle.click()
+  await consolePage.waitForTimeout(1500)
 
   // La consola se recarga a propósito: su mostrador de contraseñas refresca cada 5 s la
   // lista con la que decide QUIÉN puede pedir, pero la lista que se VE solo se repinta
   // cuando llega una petición. Recargando, las dos dicen lo mismo antes de seguir.
-  await consola.reload()
-  await consola.waitForSelector('[data-testid="vault-at"][data-where="self"]', { timeout: 40000 })
-  await consola.locator('[data-testid="password-device"]').first().waitFor({ timeout: 40000 })
+  await consolePage.reload()
+  await consolePage.waitForSelector('[data-testid="vault-at"][data-where="self"]', { timeout: 40000 })
+  await consolePage.locator('[data-testid="password-device"]').first().waitFor({ timeout: 40000 })
 })
 
-scenario('lo que la extensión guarda queda en la bóveda de la pestaña', async () => {
-  const { popup, consola } = estado
-  const entrada = {
+scenario('what the extension stores ends up in the tab vault', async () => {
+  const { popup, consolePage } = state
+  const entry = {
     title: 'localhost', sites: ['localhost'], name: 'La de la pestaña',
     username: 'ana@ejemplo.com', secret: 'hunter2',
     fields: [
@@ -176,33 +176,33 @@ scenario('lo que la extensión guarda queda en la bóveda de la pestaña', async
       { label: 'Número de socio', value: 'SOC-4471', private: true },
     ],
   }
-  const puesta = await pedir(popup, 'put', { entry: entrada })
-  assert.ok(puesta?.result?.id, 'la extensión escribe a través del proxio: ' + JSON.stringify(puesta?.error || ''))
-  estado.id = puesta.result.id
+  const stored = await ask(popup, 'put', { entry })
+  assert.ok(stored?.result?.id, 'the extension writes through the proxy: ' + JSON.stringify(stored?.error || ''))
+  state.id = stored.result.id
 
   // Y la bóveda la tiene: lo dice su propia pantalla, que lee de su almacén, no del
   // mensaje que acaba de llegar.
-  await consola.locator('.vault').getByText('localhost').first().waitFor({ timeout: 30000 })
-  assert.match(await consola.locator('.vault').innerText(), /localhost/,
-    'la bóveda enseña la entrada entre las suyas, leída de su propio almacén')
+  await consolePage.locator('.vault').getByText('localhost').first().waitFor({ timeout: 30000 })
+  assert.match(await consolePage.locator('.vault').innerText(), /localhost/,
+    'the vault shows the entry among its own, read from its own store')
 })
 
-scenario('buscar y rellenar van por el proxio, y solo lo privado se pregunta', async () => {
-  const { popup, consola } = estado
+scenario('find and fill go through the proxy, and only private data is asked about', async () => {
+  const { popup, consolePage } = state
 
-  const hay = (await pedir(popup, 'find', { url: 'https://localhost/entrar' }))?.result || []
-  const mia = hay.find((e) => e.id === estado.id)
-  assert.ok(mia, 'la extensión encuentra la entrada preguntando por su dominio')
-  assert.equal(mia.hint, 'La de la pestaña', 'con el nombre que calculó quien SÍ puede abrirla')
-  assert.ok(mia.fieldKeys.includes('tel'), 'y con los NOMBRES de lo que lleva dentro')
-  assert.ok(mia.privateKeys.includes('label:Número de socio'), 'sabiendo cuáles son privados')
-  assert.equal(JSON.stringify(hay).includes('hunter2'), false, 'sin un solo valor')
+  const found = (await ask(popup, 'find', { url: 'https://localhost/entrar' }))?.result || []
+  const mine = found.find((e) => e.id === state.id)
+  assert.ok(mine, 'the extension finds the entry by asking for its domain')
+  assert.equal(mine.hint, 'La de la pestaña', 'with the name computed by whoever CAN open it')
+  assert.ok(mine.fieldKeys.includes('tel'), 'and with the NAMES of what it holds')
+  assert.ok(mine.privateKeys.includes('label:Número de socio'), 'knowing which ones are private')
+  assert.equal(JSON.stringify(found).includes('hunter2'), false, 'without a single value')
 
   // Un dato PÚBLICO no molesta a nadie: se pide por su clave y la bóveda no pregunta.
-  const publico = await pedir(popup, 'get', { id: estado.id, keys: ['tel'] })
-  assert.equal(JSON.parse(publico.result.fields)[0].value, '0999111222', 'el teléfono llega')
-  assert.equal(await consola.locator('[data-testid="approve"]').count(), 0,
-    'y la bóveda no ha preguntado nada')
+  const publicValue = await ask(popup, 'get', { id: state.id, keys: ['tel'] })
+  assert.equal(JSON.parse(publicValue.result.fields)[0].value, '0999111222', 'the phone arrives')
+  assert.equal(await consolePage.locator('[data-testid="approve"]').count(), 0,
+    'and the vault has not asked anything')
 
   // Uno PRIVADO sí: y la pregunta sale en LA BÓVEDA, que es la otra pantalla. Esa es la
   // diferencia entera con la bóveda de dentro de la extensión.
@@ -210,100 +210,100 @@ scenario('buscar y rellenar van por el proxio, y solo lo privado se pregunta', a
   // El orden importa y no es casual: **el no va primero**. La aprobación se recuerda por
   // APARATO (§2.0), así que en cuanto se dice que sí ya no vuelve a preguntar — probar el
   // no después sería probarlo cuando ya no puede pasar.
-  const negar = pedir(popup, 'get', { id: estado.id, keys: ['secret'] })
-  await consola.waitForSelector('[data-testid="deny"]', { timeout: 30000 })
-  await consola.locator('[data-testid="deny"]').click()
-  assert.ok((await negar)?.error, 'con el no, la extensión se queda sin nada')
+  const denied = ask(popup, 'get', { id: state.id, keys: ['secret'] })
+  await consolePage.waitForSelector('[data-testid="deny"]', { timeout: 30000 })
+  await consolePage.locator('[data-testid="deny"]').click()
+  assert.ok((await denied)?.error, 'with a no, the extension gets nothing')
 
-  const pide = pedir(popup, 'get', { id: estado.id, keys: ['secret'] })
-  await consola.waitForSelector('[data-testid="approve"]', { timeout: 30000 })
-  assert.ok(true, 'y vuelve a preguntar: un no no se recuerda nunca')
-  await consola.locator('[data-testid="approve"]').click()
-  assert.equal((await pide)?.result?.secret, 'hunter2', 'con el sí, la contraseña llega')
+  const asked = ask(popup, 'get', { id: state.id, keys: ['secret'] })
+  await consolePage.waitForSelector('[data-testid="approve"]', { timeout: 30000 })
+  assert.ok(true, 'and it asks again: a no is never remembered')
+  await consolePage.locator('[data-testid="approve"]').click()
+  assert.equal((await asked)?.result?.secret, 'hunter2', 'with a yes, the password arrives')
 
   // Y de ahí en adelante NO vuelve a preguntar: lo aprobado es el aparato, no la
   // credencial. Es lo que hace que el gestor se pueda usar sin un dedo en cada campo.
-  const otra = await pedir(popup, 'get', { id: estado.id, keys: ['secret'] })
-  assert.equal(otra?.result?.secret, 'hunter2', 'la segunda vez llega igual')
-  assert.equal(await consola.locator('[data-testid="approve"]').count(), 0,
-    'y sin preguntar: la aprobación es del APARATO (§2.0)')
+  const again = await ask(popup, 'get', { id: state.id, keys: ['secret'] })
+  assert.equal(again?.result?.secret, 'hunter2', 'the second time it arrives just the same')
+  assert.equal(await consolePage.locator('[data-testid="approve"]').count(), 0,
+    'and without asking: approval belongs to the DEVICE (§2.0)')
 })
 
-scenario('editar desde el gestor cambia lo de la bóveda, sin traerse lo privado', async () => {
-  const { popup, consola } = estado
+scenario('editing from the manager changes the vault copy, without fetching private data', async () => {
+  const { popup, consolePage } = state
 
   // Es lo que hace el gestor al guardar: un `patch`, que fusiona DENTRO de la bóveda.
-  const r = await pedir(popup, 'patch', {
-    id: estado.id,
+  const r = await ask(popup, 'patch', {
+    id: state.id,
     changes: {
       name: 'Renombrada desde el gestor',
       fields: [{ kind: 'tel', label: 'Teléfono', value: '0988000111' }],
       sites: ['localhost', 'otro-dominio.example'],
     },
   })
-  assert.ok(!r?.error, 'el patch viaja: ' + JSON.stringify(r?.error || ''))
-  assert.equal(await consola.locator('[data-testid="approve"]').count(), 0,
-    'y escribir NO pide autorización, ni siquiera con un privado dentro')
+  assert.ok(!r?.error, 'the patch travels: ' + JSON.stringify(r?.error || ''))
+  assert.equal(await consolePage.locator('[data-testid="approve"]').count(), 0,
+    'and writing does NOT ask for authorization, even with a private field inside')
 
-  const hay = (await pedir(popup, 'find', { url: 'https://otro-dominio.example/' }))?.result || []
-  const mia = hay.find((e) => e.id === estado.id)
-  assert.ok(mia, 'el registro cruza al dominio nuevo')
-  assert.equal(mia.hint, 'Renombrada desde el gestor', 'con su nombre nuevo')
-  assert.ok(mia.privateKeys.includes('label:Número de socio'),
-    'y lo privado sigue marcado: el patch no lo tocó')
+  const found = (await ask(popup, 'find', { url: 'https://otro-dominio.example/' }))?.result || []
+  const mine = found.find((e) => e.id === state.id)
+  assert.ok(mine, 'the entry crosses to the new domain')
+  assert.equal(mine.hint, 'Renombrada desde el gestor', 'with its new name')
+  assert.ok(mine.privateKeys.includes('label:Número de socio'),
+    'and the private field is still marked: the patch did not touch it')
 })
 
-scenario('los dominios y el buscador del gestor también funcionan enlazados', async () => {
-  const { popup } = estado
-  const sitios = (await pedir(popup, 'sites'))?.result || []
-  assert.ok(sitios.some((s) => s.site === 'localhost'), 'la bóveda dice en qué dominios hay algo')
-  assert.equal(JSON.stringify(sitios).includes('hunter2'), false, 'sin un valor dentro')
+scenario('the manager\'s domains and search also work when linked', async () => {
+  const { popup } = state
+  const sites = (await ask(popup, 'sites'))?.result || []
+  assert.ok(sites.some((s) => s.site === 'localhost'), 'the vault says which domains have something')
+  assert.equal(JSON.stringify(sites).includes('hunter2'), false, 'without a value inside')
 
-  const encontrado = (await pedir(popup, 'search', { q: 'otro-dominio' }))?.result || []
-  assert.ok(encontrado.some((e) => e.id === estado.id),
-    'y buscar por texto llega a la entrada aunque no estés en su sitio')
+  const matches = (await ask(popup, 'search', { q: 'otro-dominio' }))?.result || []
+  assert.ok(matches.some((e) => e.id === state.id),
+    'and text search reaches the entry even when you are not on its site')
 })
 
-scenario('con la pestaña en segundo plano, la bóveda AVISA en vez de callarse', async () => {
-  const { popup, consola } = estado
+scenario('with the tab in the background, the vault NOTIFIES instead of staying silent', async () => {
+  const { popup, consolePage } = state
 
   // El interruptor está a la vista, y no se pide el permiso solo al abrir: un navegador
   // que pregunta sin que hayas pulsado nada es un navegador que molesta.
-  assert.equal(await consola.locator('[data-testid="ring-enable"], [data-testid="ring-on"]').count(), 1,
-    'la bóveda ofrece encender los avisos')
+  assert.equal(await consolePage.locator('[data-testid="ring-enable"], [data-testid="ring-on"]').count(), 1,
+    'the vault offers to turn on notifications')
 
   // La aprobación se recuerda por APARATO (§2.0) y ya se dijo que sí, así que no
   // volvería a preguntar. Se recarga la consola: la puerta vive en memoria, y apagar la
   // bóveda retira lo aprobado — eso es el diseño, no un atajo del test.
-  await consola.reload()
-  await consola.waitForSelector('[data-testid="vault-at"][data-where="self"]', { timeout: 40000 })
-  await consola.locator('[data-testid="password-device"]').first().waitFor({ timeout: 40000 })
-  await consola.evaluate(() => { window.__avisos.length = 0 })
+  await consolePage.reload()
+  await consolePage.waitForSelector('[data-testid="vault-at"][data-where="self"]', { timeout: 40000 })
+  await consolePage.locator('[data-testid="password-device"]').first().waitFor({ timeout: 40000 })
+  await consolePage.evaluate(() => { window.__notices.length = 0 })
 
   // Y la pestaña deja de estar delante. En `--headless=new` TODAS se declaran visibles,
   // así que la condición se fuerza: lo que se prueba es qué hace la bóveda cuando nadie
   // la mira, no si Chrome sabe decirlo sin escritorio.
   await popup.bringToFront()
-  await consola.evaluate(() => {
+  await consolePage.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, get: () => true })
   })
 
-  const pide = pedir(popup, 'get', { id: estado.id, keys: ['secret'] })
-  await consola.waitForFunction(() => (window.__avisos || []).length > 0, null, { timeout: 30000 })
-  const avisos = await consola.evaluate(() => window.__avisos)
-  assert.ok(avisos.some((a) => a.tag === 'dotrino-vault-ask'),
-    'avisa que hay algo esperando: ' + JSON.stringify(avisos))
+  const asked = ask(popup, 'get', { id: state.id, keys: ['secret'] })
+  await consolePage.waitForFunction(() => (window.__notices || []).length > 0, null, { timeout: 30000 })
+  const notices = await consolePage.evaluate(() => window.__notices)
+  assert.ok(notices.some((a) => a.tag === 'dotrino-vault-ask'),
+    'it notifies that something is waiting: ' + JSON.stringify(notices))
 
   // Y la pregunta sigue en su sitio: el aviso llama, no decide.
-  await consola.bringToFront()
-  await consola.locator('[data-testid="approve"]').click()
-  assert.equal((await pide)?.result?.secret, 'hunter2', 'y al volver, se contesta desde la pantalla')
+  await consolePage.bringToFront()
+  await consolePage.locator('[data-testid="approve"]').click()
+  assert.equal((await asked)?.result?.secret, 'hunter2', 'and on coming back, it is answered from the screen')
 })
 
 // ---------- arranque ----------
 
 console.log('\nSMOKE · the extension with the TAB vault, all local\n')
-if (!fs.existsSync(path.join(CONSOLA, 'index.html'))) {
+if (!fs.existsSync(path.join(CONSOLE_DIST, 'index.html'))) {
   console.error('Missing the console build:  cd dotrino-vault/web && npm run build\n')
   process.exit(2)
 }
@@ -314,18 +314,18 @@ if (!fs.existsSync(path.join(EXT, 'src/vendor/passmanager/index.js'))) {
 try {
   const { chromium } = await import('playwright')
   proxy = await startProxy({ log })
-  webConsola = await serveStatic(CONSOLA, { spa: true })
+  webConsole = await serveStatic(CONSOLE_DIST, { spa: true })
   webIframe = await serveStatic(IFRAME)
-  webSitio = await serveStatic(SITIO)
+  webSite = await serveStatic(SITE_DIR)
   console.log(`  proxy     ${proxy.url}`)
-  console.log(`  consola   ${webConsola.url}/vault`)
+  console.log(`  console   ${webConsole.url}/vault`)
   console.log(`  identity  ${webIframe.url}`)
-  console.log(`  site      ${webSitio.url}\n`)
+  console.log(`  site      ${webSite.url}\n`)
 
   // Una extensión solo se carga en un contexto PERSISTENTE: no hay `newContext` que la
   // acepte. Y el service worker de MV3 es lo que da su id.
-  perfilDir = await mkdtemp(path.join(tmpdir(), 'smoke-gestor-'))
-  contexto = await chromium.launchPersistentContext(perfilDir, {
+  profileDir = await mkdtemp(path.join(tmpdir(), 'smoke-password-manager-'))
+  context = await chromium.launchPersistentContext(profileDir, {
     headless: false,
     locale: 'es-ES',
     args: [
@@ -336,21 +336,21 @@ try {
   })
   // Los avisos, concedidos de entrada: es lo que hace el usuario al pulsar el botón, y
   // concederlos a mitad de camino obliga a recargar la consola en medio de la prueba.
-  await contexto.grantPermissions(['notifications'])
+  await context.grantPermissions(['notifications'])
 
-  const sw = contexto.serviceWorkers()[0] || await contexto.waitForEvent('serviceworker', { timeout: 20000 })
+  const sw = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker', { timeout: 20000 })
   extId = new URL(sw.url()).host
   console.log(`  extension ${extId}\n`)
 
   const ok = await runScenarios()
-  await contexto?.close()
-  await rm(perfilDir, { recursive: true, force: true })
+  await context?.close()
+  await rm(profileDir, { recursive: true, force: true })
   await teardown()
   process.exit(ok ? 0 : 1)
 } catch (e) {
   console.error('\ncould not set up the scenario:', e?.stack || e)
-  try { await contexto?.close() } catch (_) {}
-  if (perfilDir) await rm(perfilDir, { recursive: true, force: true }).catch(() => {})
+  try { await context?.close() } catch (_) {}
+  if (profileDir) await rm(profileDir, { recursive: true, force: true }).catch(() => {})
   await teardown()
   process.exit(1)
 }

@@ -9,7 +9,7 @@
  * Se montan con un proveedor de mentira (sin red ni identidad real): lo que se comprueba es
  * lo que se PINTA, que es donde estaban los fallos.
  *
- *   npm run smoke:interfaz
+ *   npm run smoke:ui
  */
 import assert from 'node:assert/strict'
 import http from 'node:http'
@@ -26,10 +26,10 @@ const PUB = JSON.stringify({
   y: 'aOKDGCH0W4h5mvfJDzOYZku_LemsUPWoIObyy73La7k', crv: 'P-256'
 })
 const PUB2 = PUB.replace('H-iG', 'ZZZZ')
-const FOTO = 'data:image/gif;base64,R0lGODlhAQABAAAAACw='
+const PHOTO = 'data:image/gif;base64,R0lGODlhAQABAAAAACw='
 
 /** Sirve los repos tal cual, con un import map que resuelve los `@dotrino/*` a disco. */
-function paginaCon (cuerpo) {
+function pageWith (body) {
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>ui</title>
 <script type="importmap">{"imports":{
   "@dotrino/identity/avatar":"/id/vault/avatar.js",
@@ -38,44 +38,44 @@ function paginaCon (cuerpo) {
   "@dotrino/profile":"/prof/src/index.js",
   "@dotrino/support":"/stub-vacio.js",
   "@dotrino/nav":"/stub-nav.js"
-}}</script></head><body>${cuerpo}</body></html>`
+}}</script></head><body>${body}</body></html>`
 }
 
-let servidor = null
+let server = null
 let base = ''
 
-async function servir () {
-  const TIPOS = { '.js': 'text/javascript;charset=utf-8', '.svg': 'image/svg+xml' }
+async function serve () {
+  const TYPES = { '.js': 'text/javascript;charset=utf-8', '.svg': 'image/svg+xml' }
   const port = await freePort()
-  servidor = http.createServer((req, res) => {
+  server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x').pathname
-    if (u === '/stub-vacio.js') return res.writeHead(200, { 'content-type': TIPOS['.js'] }).end('export default {}')
+    if (u === '/stub-vacio.js') return res.writeHead(200, { 'content-type': TYPES['.js'] }).end('export default {}')
     if (u === '/stub-nav.js') {
       // El topbar importa el pilar de navegación; aquí solo estorba.
-      return res.writeHead(200, { 'content-type': TIPOS['.js'] })
+      return res.writeHead(200, { 'content-type': TYPES['.js'] })
         .end('export function createBackNav(){return{destroy(){}}}\nexport function getBackNav(){return{push(){},destroy(){}}}\nexport default {}')
     }
     const f = u.startsWith('/id/') ? path.join(ROOT, 'dotrino-identity', u.slice(4))
       : u.startsWith('/prof/') ? path.join(ROOT, 'dotrino-profile', u.slice(6))
         : u.startsWith('/tb/') ? path.join(ROOT, 'dotrino-topbar', u.slice(4)) : null
-    if (!f || !fs.existsSync(f)) return res.writeHead(404).end('no está')
-    res.writeHead(200, { 'content-type': TIPOS[path.extname(f)] || 'application/octet-stream' })
+    if (!f || !fs.existsSync(f)) return res.writeHead(404).end('not found')
+    res.writeHead(200, { 'content-type': TYPES[path.extname(f)] || 'application/octet-stream' })
     fs.createReadStream(f).pipe(res)
   })
-  await new Promise((r) => servidor.listen(port, '127.0.0.1', r))
+  await new Promise((r) => server.listen(port, '127.0.0.1', r))
   base = `http://127.0.0.1:${port}`
 }
 
-let navegador = null
-let contexto = null
+let browser = null
+let context = null
 
-async function abrir (cuerpo, guion) {
-  const page = await contexto.newPage()
+async function open (body, script) {
+  const page = await context.newPage()
   page.on('pageerror', (e) => log('[error] ' + e.message))
-  await page.route('**/ui', (route) => route.fulfill({ contentType: 'text/html', body: paginaCon(cuerpo) }))
+  await page.route('**/ui', (route) => route.fulfill({ contentType: 'text/html', body: pageWith(body) }))
   await page.goto(base + '/ui')
-  await page.addScriptTag({ type: 'module', content: guion })
-  await page.addScriptTag({ content: MEDIDOR })
+  await page.addScriptTag({ type: 'module', content: script })
+  await page.addScriptTag({ content: MEASURER })
   await page.waitForTimeout(900)
   return page
 }
@@ -86,39 +86,39 @@ async function abrir (cuerpo, guion) {
  * según `scrollWidth` y está perfectamente bien. Lo que no puede pasar es que una caja se
  * pinte fuera de la tarjeta, que es lo que se ve feo.
  */
-const MEDIDOR = `window.medirDesborde = () => {
+const MEASURER = `window.measureOverflow = () => {
   const host = document.querySelector('dotrino-profile')
   // El límite es el CONTENEDOR de la app, no la tarjeta: el fallo típico es justo que la
   // tarjeta crezca más que el hueco que le dieron, y entonces medida contra sí misma
   // «cabe» perfectamente mientras se sale por la derecha de la pantalla.
-  const caja = document.getElementById('host') || host.parentElement
-  const limite = caja.getBoundingClientRect().right
-  const propio = host.getBoundingClientRect()
-  const malos = propio.right > limite + 2 ? [{ clase: 'la tarjeta entera', sobra: Math.round(propio.right - limite) }] : []
+  const box = document.getElementById('host') || host.parentElement
+  const limit = box.getBoundingClientRect().right
+  const own = host.getBoundingClientRect()
+  const bad = own.right > limit + 2 ? [{ cls: 'the whole card', overflow: Math.round(own.right - limit) }] : []
   for (const n of host.shadowRoot.querySelectorAll('*')) {
     const r = n.getBoundingClientRect()
     if (r.width === 0) continue
-    if (r.right > limite + 2) malos.push({ clase: String(n.className || n.tagName), sobra: Math.round(r.right - limite) })
+    if (r.right > limit + 2) bad.push({ cls: String(n.className || n.tagName), overflow: Math.round(r.right - limit) })
   }
-  return malos
+  return bad
 }`
 
 /** Texto visible del shadow DOM (sin estilos, que si no se cuela el CSS entero). */
-const textoDe = (page, sel) => page.evaluate((s) => {
+const textOf = (page, sel) => page.evaluate((s) => {
   const sr = document.querySelector(s)?.shadowRoot
   if (!sr) return ''
   return [...sr.children].filter((n) => n.tagName !== 'STYLE')
     .map((n) => n.innerText || n.textContent || '').join('\n').replace(/\s+/g, ' ').trim()
 }, sel)
 
-scenario('el modal de perfil NUNCA enseña la pubkey en crudo', async () => {
-  const page = await abrir('<div id="host"></div>', `
+scenario('the profile modal NEVER shows the raw pubkey', async () => {
+  const page = await open('<div id="host"></div>', `
     import '/prof/src/index.js'
     const PUB = ${JSON.stringify(PUB)}
     const el = document.createElement('dotrino-profile')
     el.setAttribute('mode','self'); el.setAttribute('pubkey', PUB); el.setAttribute('name','Dotrino'); el.setAttribute('lang','es')
     el.provider = {
-      async listProfiles(){ return [{ id:'p1', name:'Dotrino', pubkey: PUB, avatar: ${JSON.stringify(FOTO)}, current:true }] },
+      async listProfiles(){ return [{ id:'p1', name:'Dotrino', pubkey: PUB, avatar: ${JSON.stringify(PHOTO)}, current:true }] },
       async currentProfile(){ return { id:'p1', name:'Dotrino', pubkey: PUB } },
       async getMyProfile(){ return { nickname:'Dotrino' } },
       async getMyRating(){ return null }, async getEndorsements(){ return [] }, async getCloud(){ return null }
@@ -126,23 +126,23 @@ scenario('el modal de perfil NUNCA enseña la pubkey en crudo', async () => {
     document.getElementById('host').appendChild(el)
   `)
 
-  const texto = await textoDe(page, 'dotrino-profile')
-  assert.ok(!texto.includes('"crv"') && !texto.includes('"kty"'),
-    'no puede aparecer un trozo de JWK en pantalla: ' + texto.slice(0, 160))
-  assert.match(texto, /[0-9A-F]{4}-[0-9A-F]{4}/, 'muestra la huella legible de la llave')
-  assert.match(texto, /Dotrino/, 'y el nombre')
+  const text = await textOf(page, 'dotrino-profile')
+  assert.ok(!text.includes('"crv"') && !text.includes('"kty"'),
+    'no piece of a JWK may appear on screen: ' + text.slice(0, 160))
+  assert.match(text, /[0-9A-F]{4}-[0-9A-F]{4}/, 'it shows the readable key fingerprint')
+  assert.match(text, /Dotrino/, 'and the name')
   await page.close()
 })
 
-scenario('el conmutador de perfiles muestra TU foto, no el identicon, cuando la hay', async () => {
-  const page = await abrir('<div id="host"></div>', `
+scenario('the profile switcher shows YOUR photo, not the identicon, when there is one', async () => {
+  const page = await open('<div id="host"></div>', `
     import '/prof/src/index.js'
     const PUB = ${JSON.stringify(PUB)}, PUB2 = ${JSON.stringify(PUB2)}
     const el = document.createElement('dotrino-profile')
     el.setAttribute('mode','self'); el.setAttribute('pubkey', PUB); el.setAttribute('name','Dotrino'); el.setAttribute('lang','es')
     el.provider = {
       async listProfiles(){ return [
-        { id:'p1', name:'Dotrino', pubkey: PUB, avatar: ${JSON.stringify(FOTO)}, current:true },
+        { id:'p1', name:'Dotrino', pubkey: PUB, avatar: ${JSON.stringify(PHOTO)}, current:true },
         { id:'p2', name:'Trabajo', pubkey: PUB2, current:false }
       ] },
       async currentProfile(){ return { id:'p1', name:'Dotrino', pubkey: PUB } },
@@ -152,45 +152,45 @@ scenario('el conmutador de perfiles muestra TU foto, no el identicon, cuando la 
     document.getElementById('host').appendChild(el)
   `)
 
-  const fuentes = await page.evaluate(() => [...document.querySelector('dotrino-profile')
+  const sources = await page.evaluate(() => [...document.querySelector('dotrino-profile')
     .shadowRoot.querySelectorAll('.prof-row img')].map((i) => i.getAttribute('src')))
-  assert.equal(fuentes.length, 2)
-  assert.equal(fuentes[0], 'data:image/gif;base64,R0lGODlhAQABAAAAACw=', 'el que tiene foto la enseña')
-  assert.match(fuentes[1], /^data:image\/svg/, 'el que no la tiene cae al identicon')
+  assert.equal(sources.length, 2)
+  assert.equal(sources[0], 'data:image/gif;base64,R0lGODlhAQABAAAAACw=', 'the one with a photo shows it')
+  assert.match(sources[1], /^data:image\/svg/, 'the one without falls back to the identicon')
   await page.close()
 })
 
-scenario('crear un perfil lleva a su página y no lo crea de golpe', async () => {
-  let creado = false
-  const page = await abrir('<div id="host"></div>', `
+scenario('creating a profile leads to its page and does not create it on the spot', async () => {
+  let created = false
+  const page = await open('<div id="host"></div>', `
     import '/prof/src/index.js'
     const PUB = ${JSON.stringify(PUB)}
     const el = document.createElement('dotrino-profile')
     el.setAttribute('mode','self'); el.setAttribute('pubkey', PUB); el.setAttribute('lang','es'); el.setAttribute('manage','')
-    window.__creado = false
+    window.__created = false
     el.provider = {
       async listProfiles(){ return [{ id:'p1', name:'Dotrino', pubkey: PUB, current:true }] },
       async currentProfile(){ return { id:'p1', name:'Dotrino', pubkey: PUB } },
       async getMyProfile(){ return { nickname:'Dotrino' } },
-      async createProfile(){ window.__creado = true },
+      async createProfile(){ window.__created = true },
       async getMyRating(){ return null }, async getEndorsements(){ return [] }, async getCloud(){ return null }
     }
     document.getElementById('host').appendChild(el)
   `)
 
-  const enlace = await page.evaluate(() => {
+  const link = await page.evaluate(() => {
     const a = document.querySelector('dotrino-profile').shadowRoot.querySelector('.prof-new')
     return { tag: a?.tagName, href: a?.getAttribute('href') || '' }
   })
-  assert.equal(enlace.tag, 'A', 'es un enlace, no un botón que crea al vuelo')
-  assert.match(enlace.href, /profile\.dotrino\.com\/create/, 'apunta a la página común de creación')
-  creado = await page.evaluate(() => window.__creado)
-  assert.equal(creado, false, 'no se creó ningún perfil solo por abrir el modal')
+  assert.equal(link.tag, 'A', 'it is a link, not a button that creates on the fly')
+  assert.match(link.href, /profile\.dotrino\.com\/create/, 'it points to the shared creation page')
+  created = await page.evaluate(() => window.__created)
+  assert.equal(created, false, 'no profile was created just by opening the modal')
   await page.close()
 })
 
-scenario('el topbar abre el menú de perfiles al PULSAR el avatar', async () => {
-  const page = await abrir('', `
+scenario('the topbar opens the profile menu when the avatar is CLICKED', async () => {
+  const page = await open('', `
     import '/tb/src/index.js'
     const PUB = ${JSON.stringify(PUB)}, PUB2 = ${JSON.stringify(PUB2)}
     const tb = document.createElement('dotrino-topbar')
@@ -200,74 +200,74 @@ scenario('el topbar abre el menú de perfiles al PULSAR el avatar', async () => 
       async getMe(){ return { avatar: null } },
       async currentProfile(){ return { id:'p1', name:'Dotrino', pubkey: PUB } },
       async listProfiles(){ return [
-        { id:'p1', name:'Dotrino', pubkey: PUB, avatar: ${JSON.stringify(FOTO)}, current:true },
+        { id:'p1', name:'Dotrino', pubkey: PUB, avatar: ${JSON.stringify(PHOTO)}, current:true },
         { id:'p2', name:'Trabajo', pubkey: PUB2, current:false }
       ] },
       // En sessionStorage porque cambiar de perfil RECARGA la página (no es reactivo,
       // por diseño) y una variable suelta no sobreviviría a la recarga.
-      async switchProfile(id){ sessionStorage.setItem('cambiado', id) }
+      async switchProfile(id){ sessionStorage.setItem('switched', id) }
     }
     tb.reputation = {}
     document.body.appendChild(tb)
   `)
 
   // El menú nace oculto: solo aparece al acercarse.
-  const antes = await page.evaluate(() => document.querySelector('dotrino-topbar').shadowRoot.querySelector('.prof-menu').hidden)
-  assert.equal(antes, true, 'no estorba hasta que lo pides')
+  const before = await page.evaluate(() => document.querySelector('dotrino-topbar').shadowRoot.querySelector('.prof-menu').hidden)
+  assert.equal(before, true, 'it stays out of the way until asked')
 
   await page.evaluate(() => document.querySelector('dotrino-topbar').shadowRoot.querySelector('.profile').click())
   await page.waitForTimeout(500)
 
   const menu = await page.evaluate(() => {
     const m = document.querySelector('dotrino-topbar').shadowRoot.querySelector('.prof-menu')
-    return { oculto: m.hidden, texto: (m.innerText || m.textContent).replace(/\s+/g, ' ').trim() }
+    return { hidden: m.hidden, text: (m.innerText || m.textContent).replace(/\s+/g, ' ').trim() }
   })
-  assert.equal(menu.oculto, false, 'se abre al pulsar')
-  assert.match(menu.texto, /Dotrino/)
-  assert.match(menu.texto, /Trabajo/, 'lista los otros perfiles para cambiar de un clic')
-  assert.match(menu.texto, /Abrir mi perfil/, 'y ofrece abrir tu perfil (en móvil es la única vía)')
-  assert.match(menu.texto, /Crear perfil/, 'y crear uno nuevo')
+  assert.equal(menu.hidden, false, 'it opens on click')
+  assert.match(menu.text, /Dotrino/)
+  assert.match(menu.text, /Trabajo/, 'it lists the other profiles to switch in one click')
+  assert.match(menu.text, /Abrir mi perfil/, 'and offers to open your profile (on mobile it is the only way)')
+  assert.match(menu.text, /Crear perfil/, 'and to create a new one')
 
   // Ninguna fila puede pintarse fuera del menú: el resaltado del ratón se salía por los
   // lados (width:100% + relleno sin box-sizing) y el visto del perfil activo quedaba
   // montado sobre el borde.
-  const filas = await page.evaluate(() => {
+  const rows = await page.evaluate(() => {
     const sr = document.querySelector('dotrino-topbar').shadowRoot
     const m = sr.querySelector('.prof-menu')
-    const caja = m.getBoundingClientRect()
-    const est = getComputedStyle(m)
-    const dentroIzq = caja.left + parseFloat(est.paddingLeft) + parseFloat(est.borderLeftWidth)
-    const dentroDer = caja.right - parseFloat(est.paddingRight) - parseFloat(est.borderRightWidth)
+    const box = m.getBoundingClientRect()
+    const style = getComputedStyle(m)
+    const innerLeft = box.left + parseFloat(style.paddingLeft) + parseFloat(style.borderLeftWidth)
+    const innerRight = box.right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth)
     return [...m.querySelectorAll('.item')].map((n) => {
       const r = n.getBoundingClientRect()
-      return { clase: n.className, sobraIzq: +(dentroIzq - r.left).toFixed(1), sobraDer: +(r.right - dentroDer).toFixed(1) }
+      return { cls: n.className, overLeft: +(innerLeft - r.left).toFixed(1), overRight: +(r.right - innerRight).toFixed(1) }
     })
   })
-  for (const f of filas) {
-    assert.ok(f.sobraIzq <= 0.5 && f.sobraDer <= 0.5,
-      'una fila se sale del menú: ' + JSON.stringify(f))
+  for (const f of rows) {
+    assert.ok(f.overLeft <= 0.5 && f.overRight <= 0.5,
+      'a row overflows the menu: ' + JSON.stringify(f))
   }
 
   // El visto del activo tiene su propio hueco, no va pegado al borde.
-  const visto = await page.evaluate(() => {
+  const check = await page.evaluate(() => {
     const sr = document.querySelector('dotrino-topbar').shadowRoot
-    const marca = sr.querySelector('.prof-menu .item[aria-current] .marca')
-    if (!marca) return null
-    const fila = marca.closest('.item').getBoundingClientRect()
-    return +(fila.right - marca.getBoundingClientRect().right).toFixed(1)
+    const mark = sr.querySelector('.prof-menu .item[aria-current] .marca')
+    if (!mark) return null
+    const row = mark.closest('.item').getBoundingClientRect()
+    return +(row.right - mark.getBoundingClientRect().right).toFixed(1)
   })
-  assert.ok(visto !== null && visto >= 4, 'el visto del perfil activo respira del borde: ' + visto)
+  assert.ok(check !== null && check >= 4, 'the active profile check mark keeps away from the edge: ' + check)
 
   // Cambiar de perfil avisa al vault y RECARGA la app (así todo arranca con el nuevo).
   await page.evaluate(() => document.querySelector('dotrino-topbar').shadowRoot
     .querySelector('[data-switch="p2"]').click())
   await page.waitForTimeout(800)
-  assert.equal(await page.evaluate(() => sessionStorage.getItem('cambiado')), 'p2', 'cambia al perfil elegido')
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('switched')), 'p2', 'it switches to the chosen profile')
   await page.close()
 })
 
-scenario('pulsar el avatar NO abre ningún modal ni navega: abre el menú', async () => {
-  const page = await abrir('', `
+scenario('clicking the avatar opens NO modal and does not navigate: it opens the menu', async () => {
+  const page = await open('', `
     import '/tb/src/index.js'
     const PUB = ${JSON.stringify(PUB)}
     const tb = document.createElement('dotrino-topbar')
@@ -279,30 +279,30 @@ scenario('pulsar el avatar NO abre ningún modal ni navega: abre el menú', asyn
     document.body.appendChild(tb)
   `)
 
-  const antesUrl = page.url()
+  const urlBefore = page.url()
   await page.evaluate(() => document.querySelector('dotrino-topbar').shadowRoot.querySelector('.profile').click())
   await page.waitForTimeout(600)
 
-  assert.equal(page.url(), antesUrl, 'pulsar no te saca de la página: abre el menú')
-  const modales = await page.evaluate(() => document.querySelectorAll('dotrino-profile[modal]').length)
-  assert.equal(modales, 0, 'y no aparece ningún modal de tu perfil')
-  const abierto = await page.evaluate(() => !document.querySelector('dotrino-topbar').shadowRoot.querySelector('.prof-menu').hidden)
-  assert.equal(abierto, true, 'el menú queda abierto')
+  assert.equal(page.url(), urlBefore, 'clicking does not leave the page: it opens the menu')
+  const modals = await page.evaluate(() => document.querySelectorAll('dotrino-profile[modal]').length)
+  assert.equal(modals, 0, 'and no profile modal appears')
+  const isOpen = await page.evaluate(() => !document.querySelector('dotrino-topbar').shadowRoot.querySelector('.prof-menu').hidden)
+  assert.equal(isOpen, true, 'the menu stays open')
 
   // Y desde ahí se llega a tu perfil, que es un enlace normal.
   const href = await page.evaluate(() => document.querySelector('dotrino-topbar').shadowRoot
     .querySelector('.prof-menu a')?.getAttribute('href'))
-  assert.match(href || '', /profile\.dotrino\.com/, '«Abrir mi perfil» lleva a tu página')
+  assert.match(href || '', /profile\.dotrino\.com/, '«Abrir mi perfil» leads to your page')
 
   // Un segundo clic lo cierra.
   await page.evaluate(() => document.querySelector('dotrino-topbar').shadowRoot.querySelector('.profile').click())
   await page.waitForTimeout(300)
-  assert.equal(await page.evaluate(() => document.querySelector('dotrino-topbar').shadowRoot.querySelector('.prof-menu').hidden), true, 'y otro clic lo cierra')
+  assert.equal(await page.evaluate(() => document.querySelector('dotrino-topbar').shadowRoot.querySelector('.prof-menu').hidden), true, 'and another click closes it')
   await page.close()
 })
 
-scenario('el MODAL de otra persona no se desborda en una pantalla estrecha', async () => {
-  const page = await abrir('<div id="host"></div>', `
+scenario("another person's MODAL does not overflow on a narrow screen", async () => {
+  const page = await open('<div id="host"></div>', `
     import '/prof/src/index.js'
     const PUB = ${JSON.stringify(PUB)}, PUB2 = ${JSON.stringify(PUB2)}
     const el = document.createElement('dotrino-profile')
@@ -327,21 +327,21 @@ scenario('el MODAL de otra persona no se desborda en una pantalla estrecha', asy
   `)
 
   // En un modal el límite es la PANTALLA, no un hueco de la app.
-  const fuera = await page.evaluate(() => {
+  const outside = await page.evaluate(() => {
     const sr = document.querySelector('dotrino-profile').shadowRoot
-    const ancho = document.documentElement.clientWidth
+    const width = document.documentElement.clientWidth
     return [...sr.querySelectorAll('*')]
       .map((n) => ({ n, r: n.getBoundingClientRect() }))
-      .filter((x) => x.r.width > 0 && x.r.right > ancho + 2)
-      .map((x) => ({ clase: String(x.n.className || x.n.tagName), sobra: Math.round(x.r.right - ancho) }))
+      .filter((x) => x.r.width > 0 && x.r.right > width + 2)
+      .map((x) => ({ cls: String(x.n.className || x.n.tagName), overflow: Math.round(x.r.right - width) }))
       .slice(0, 8)
   })
-  assert.deepEqual(fuera, [], 'nada puede salirse de la pantalla: ' + JSON.stringify(fuera))
+  assert.deepEqual(outside, [], 'nothing may overflow the screen: ' + JSON.stringify(outside))
   await page.close()
 })
 
-scenario('tu propio perfil, con el editor y varios perfiles, tampoco se desborda', async () => {
-  const page = await abrir('<div id="host" style="width:360px"></div>', `
+scenario('your own profile, with the editor and several profiles, does not overflow either', async () => {
+  const page = await open('<div id="host" style="width:360px"></div>', `
     import '/prof/src/index.js'
     const PUB = ${JSON.stringify(PUB)}, PUB2 = ${JSON.stringify(PUB2)}
     const el = document.createElement('dotrino-profile')
@@ -366,18 +366,18 @@ scenario('tu propio perfil, con el editor y varios perfiles, tampoco se desborda
     document.getElementById('host').appendChild(el)
   `)
 
-  const desbordes = await page.evaluate(() => medirDesborde())
-  const anchos = await page.evaluate(() => {
+  const overflows = await page.evaluate(() => window.measureOverflow())
+  const widths = await page.evaluate(() => {
     const host = document.getElementById('host'); const el = document.querySelector('dotrino-profile')
-    const gordos = [...el.shadowRoot.querySelectorAll('*')]
+    const wide = [...el.shadowRoot.querySelectorAll('*')]
       .map((n) => ({ c: String(n.className || n.tagName), w: Math.round(n.getBoundingClientRect().width) }))
       .filter((x) => x.w > host.getBoundingClientRect().width + 2).slice(0, 6)
-    return { hueco: Math.round(host.getBoundingClientRect().width), tarjeta: Math.round(el.getBoundingClientRect().width), gordos }
+    return { slot: Math.round(host.getBoundingClientRect().width), card: Math.round(el.getBoundingClientRect().width), wide }
   })
-  log('widths: ' + JSON.stringify(anchos))
-  assert.ok(anchos.tarjeta <= anchos.hueco + 2,
-    `la tarjeta (${anchos.tarjeta}px) no cabe en su hueco (${anchos.hueco}px): ` + JSON.stringify(anchos.gordos))
-  assert.deepEqual(desbordes, [], 'nada debe salirse de su caja: ' + JSON.stringify(desbordes))
+  log('widths: ' + JSON.stringify(widths))
+  assert.ok(widths.card <= widths.slot + 2,
+    `the card (${widths.card}px) does not fit its slot (${widths.slot}px): ` + JSON.stringify(widths.wide))
+  assert.deepEqual(overflows, [], 'nothing may overflow its box: ' + JSON.stringify(overflows))
   await page.close()
 })
 
@@ -386,15 +386,15 @@ scenario('tu propio perfil, con el editor y varios perfiles, tampoco se desborda
 console.log('\nSMOKE · the shared UI (profile and topbar) in a browser\n')
 try {
   const { chromium } = await import('playwright')
-  await servir()
-  navegador = await chromium.launch({ headless: !VERBOSE })
+  await serve()
+  browser = await chromium.launch({ headless: !VERBOSE })
   // Pantalla estrecha a propósito: los desbordes se ven en el móvil, no en el escritorio.
-  contexto = await navegador.newContext({ locale: 'es-ES', viewport: { width: 380, height: 820 } })
+  context = await browser.newContext({ locale: 'es-ES', viewport: { width: 380, height: 820 } })
   const ok = await runScenarios()
-  await contexto?.close(); await navegador?.close(); servidor?.close()
+  await context?.close(); await browser?.close(); server?.close()
   process.exit(ok ? 0 : 1)
 } catch (e) {
   console.error('\ncould not set up the scenario:', e?.stack || e)
-  try { await contexto?.close(); await navegador?.close(); servidor?.close() } catch (_) {}
+  try { await context?.close(); await browser?.close(); server?.close() } catch (_) {}
   process.exit(1)
 }

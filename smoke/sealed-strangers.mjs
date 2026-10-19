@@ -22,6 +22,7 @@
  */
 import assert from 'node:assert/strict'
 import { scenario, runScenarios, startProxy, teardown } from './lib/harness.js'
+import { sleep } from './lib/wait.js'
 
 import { WebSocketProxyClient } from '../../dotrino-proxy-client/src/client.js'
 import { makeEncKeypair, setSealingPrimitives } from '../../dotrino-proxy-client/src/sealing.js'
@@ -35,15 +36,15 @@ const log = (m) => { if (VERBOSE) console.log(m) }
 let proxy = null
 
 /** Una identidad nueva: llave de firma (la del cable) + llave de cifrado. */
-async function identidad (nombre) {
-  const firma = await makeDeviceKey()
-  const cifrado = await makeEncKeypair()
+async function identity (name) {
+  const signing = await makeDeviceKey()
+  const encryption = await makeEncKeypair()
   return {
-    nombre,
-    publickey: firma.publickey,
-    encPub: cifrado.encPub,
-    encPrivateKey: cifrado.privateKey,
-    sign: (data) => signWithDevice({ privateJwk: firma.privateJwk, publickey: firma.publickey, data })
+    name,
+    publickey: signing.publickey,
+    encPub: encryption.encPub,
+    encPrivateKey: encryption.privateKey,
+    sign: (data) => signWithDevice({ privateJwk: signing.privateJwk, publickey: signing.publickey, data })
   }
 }
 
@@ -52,7 +53,7 @@ async function identidad (nombre) {
  * para VER lo que sale por el cable: es la única medida honesta de «¿el proxio lo pudo
  * leer?» — mirar una bandera del cliente no prueba nada.
  */
-async function conectar (id) {
+async function connect (id) {
   const c = new WebSocketProxyClient({
     url: proxy.url,
     enableWebRTC: false,
@@ -61,140 +62,139 @@ async function conectar (id) {
     myEncPub: id.encPub,
     myEncPrivateKey: id.encPrivateKey
   })
-  c.cable = []
+  c.wireLog = []
   const raw = c._sendRaw.bind(c)
-  c._sendRaw = (frame) => { c.cable.push(frame); return raw(frame) }
-  c.recibidos = []
-  c.errores = []
-  c.on('message', (from, payload, meta) => c.recibidos.push({ from, payload, meta }))
-  c.on('error', (e) => c.errores.push(e))
+  c._sendRaw = (frame) => { c.wireLog.push(frame); return raw(frame) }
+  c.inbox = []
+  c.seenErrors = []
+  c.on('message', (from, payload, meta) => c.inbox.push({ from, payload, meta }))
+  c.on('error', (e) => c.seenErrors.push(e))
 
   await c.connect()
   await c.identifyAs({ publickey: id.publickey, sign: id.sign })
   // `identify` anuncia por detrás; aquí se espera a propósito, porque el escenario
   // siguiente pregunta por esta llave.
   await c.announceEncPub({ publickey: id.publickey, encPub: id.encPub, sign: id.sign })
-  log(`  ${id.nombre}: token ${c.token}`)
+  log(`  ${id.name}: token ${c.token}`)
   return c
 }
 
-const conContenido = (c) => c.cable.filter((f) => f.message !== undefined)
-const esperar = (ms) => new Promise((r) => setTimeout(r, ms))
+const withContent = (c) => c.wireLog.filter((f) => f.message !== undefined)
 
-scenario('el proxio dice de entrada que sabe servir llaves de cifrado', async () => {
+scenario('the proxy says up front that it can serve encryption keys', async () => {
   proxy = await startProxy({ log })
-  const ana = await identidad('ana')
-  const c = await conectar(ana)
-  assert.equal(c.protocol, 2, 'el proxio no anuncia protocolo')
-  assert.ok(c.caps.includes('encpub'), `caps sin encpub: ${JSON.stringify(c.caps)}`)
+  const ana = await identity('ana')
+  const c = await connect(ana)
+  assert.equal(c.protocol, 2, 'the proxy does not announce a protocol')
+  assert.ok(c.caps.includes('encpub'), `caps without encpub: ${JSON.stringify(c.caps)}`)
   c.close()
 })
 
-scenario('ana le sella a beto sin haberse emparejado nunca', async () => {
-  const ana = await identidad('ana')
-  const beto = await identidad('beto')
-  const cAna = await conectar(ana)
-  const cBeto = await conectar(beto)
+scenario('ana seals to beto without ever having paired', async () => {
+  const ana = await identity('ana')
+  const beto = await identity('beto')
+  const cAna = await connect(ana)
+  const cBeto = await connect(beto)
 
   // Lo ÚNICO que ana sabe de beto es su pubkey. Ni contacto, ni cita, ni llave.
-  assert.equal(cAna._encPubs.has(beto.publickey), false, 'ya la tenía de antes')
+  assert.equal(cAna._encPubs.has(beto.publickey), false, 'ana already had it beforehand')
 
-  const secreto = 'el sobre esta en el cajon de arriba'
-  await cAna.sendSealed([beto.publickey], { texto: secreto })
+  const secret = 'the envelope is in the top drawer'
+  await cAna.sendSealed([beto.publickey], { text: secret })
 
-  const salido = conContenido(cAna).at(-1)
-  assert.ok(!JSON.stringify(salido).includes(secreto), 'salió en claro: el proxio lo leyó')
-  assert.ok(!JSON.stringify(salido).includes('el sobre'), 'salió en claro')
+  const sent = withContent(cAna).at(-1)
+  assert.ok(!JSON.stringify(sent).includes(secret), 'went out in clear: the proxy read it')
+  assert.ok(!JSON.stringify(sent).includes('the envelope'), 'went out in clear')
 
-  await esperar(400)
-  assert.equal(cBeto.recibidos.length, 1, `beto no lo recibió (errores: ${JSON.stringify(cBeto.errores)})`)
-  assert.deepEqual(cBeto.recibidos[0].payload, { texto: secreto })
-  assert.equal(cBeto.recibidos[0].meta.sealed, true, 'llegó sin sellar')
+  await sleep(400)
+  assert.equal(cBeto.inbox.length, 1, `beto did not receive it (errors: ${JSON.stringify(cBeto.seenErrors)})`)
+  assert.deepEqual(cBeto.inbox[0].payload, { text: secret })
+  assert.equal(cBeto.inbox[0].meta.sealed, true, 'arrived unsealed')
 
   // Y contesta igual, en el otro sentido: la llave de ana también se averigua.
-  await cBeto.sendSealed([ana.publickey], { texto: 'recibido' })
-  await esperar(400)
-  assert.deepEqual(cAna.recibidos[0].payload, { texto: 'recibido' })
-  assert.equal(cAna.recibidos[0].meta.sealed, true)
+  await cBeto.sendSealed([ana.publickey], { text: 'received' })
+  await sleep(400)
+  assert.deepEqual(cAna.inbox[0].payload, { text: 'received' })
+  assert.equal(cAna.inbox[0].meta.sealed, true)
 
   cAna.close(); cBeto.close()
 })
 
-scenario('también con el destinatario APAGADO: se sella y espera en la cola de 24 h', async () => {
-  const ana = await identidad('ana')
-  const beto = await identidad('beto')
+scenario('also with the recipient OFFLINE: sealed and waiting in the 24 h queue', async () => {
+  const ana = await identity('ana')
+  const beto = await identity('beto')
 
   // Beto se conecta, anuncia su llave y SE VA. A partir de aquí no hay presencia ninguna
   // de la que sacar su llave: si el directorio no fuera duradero, aquí no habría nada.
-  const cBeto1 = await conectar(beto)
+  const cBeto1 = await connect(beto)
   cBeto1.close()
-  await esperar(300)
+  await sleep(300)
 
-  const cAna = await conectar(ana)
-  await cAna.sendSealed([beto.publickey], { texto: 'te dejo esto dicho' })
-  const salido = conContenido(cAna).at(-1)
-  assert.ok(!JSON.stringify(salido).includes('te dejo'), 'salió en claro')
+  const cAna = await connect(ana)
+  await cAna.sendSealed([beto.publickey], { text: 'leaving this for you' })
+  const sent = withContent(cAna).at(-1)
+  assert.ok(!JSON.stringify(sent).includes('leaving this'), 'went out in clear')
 
   // Beto vuelve: el proxio le drena la cola y el sobre se abre con su llave.
-  const cBeto2 = await conectar(beto)
-  await esperar(500)
-  assert.equal(cBeto2.recibidos.length, 1, `no le llegó lo encolado (errores: ${JSON.stringify(cBeto2.errores)})`)
-  assert.deepEqual(cBeto2.recibidos[0].payload, { texto: 'te dejo esto dicho' })
-  assert.equal(cBeto2.recibidos[0].meta.sealed, true)
-  assert.equal(cBeto2.recibidos[0].meta.queued, true, 'no vino de la cola')
+  const cBeto2 = await connect(beto)
+  await sleep(500)
+  assert.equal(cBeto2.inbox.length, 1, `the queued message did not arrive (errors: ${JSON.stringify(cBeto2.seenErrors)})`)
+  assert.deepEqual(cBeto2.inbox[0].payload, { text: 'leaving this for you' })
+  assert.equal(cBeto2.inbox[0].meta.sealed, true)
+  assert.equal(cBeto2.inbox[0].meta.queued, true, 'it did not come from the queue')
 
   cAna.close(); cBeto2.close()
 })
 
-scenario('a quien no anunció llave NO se le manda nada, y se dice por qué', async () => {
-  const ana = await identidad('ana')
-  const fantasma = await identidad('fantasma')   // nunca se conectó
-  const cAna = await conectar(ana)
-  const antes = conContenido(cAna).length
+scenario('nothing is sent to someone who announced no key, and the reason is given', async () => {
+  const ana = await identity('ana')
+  const ghost = await identity('ghost')   // nunca se conectó
+  const cAna = await connect(ana)
+  const before = withContent(cAna).length
 
   await assert.rejects(
-    () => cAna.sendSealed([fantasma.publickey], { texto: 'hola?' }),
+    () => cAna.sendSealed([ghost.publickey], { text: 'hello?' }),
     (e) => e.code === 'no-encpub',
-    'no falló con el código que distingue «no hay llave» de «se cayó la red»')
-  assert.equal(conContenido(cAna).length, antes, 'mandó algo igual')
+    'did not fail with the code that tells «no key» apart from «network down»')
+  assert.equal(withContent(cAna).length, before, 'it sent something anyway')
 
   cAna.close()
 })
 
-scenario('por TOKEN también se sella: la app dice de quién es el token', async () => {
-  const ana = await identidad('ana')
-  const beto = await identidad('beto')
-  const cAna = await conectar(ana)
-  const cBeto = await conectar(beto)
+scenario('sealing by TOKEN too: the app says whose token it is', async () => {
+  const ana = await identity('ana')
+  const beto = await identity('beto')
+  const cAna = await connect(ana)
+  const cBeto = await connect(beto)
 
-  await cAna.sendSealedTo(cBeto.token, { jugada: 'e4' }, { peerPubkey: beto.publickey })
-  const salido = conContenido(cAna).at(-1)
-  assert.deepEqual(salido.to, [cBeto.token], 'dejó de ir por token')
-  assert.ok(!JSON.stringify(salido).includes('e4'), 'salió en claro')
+  await cAna.sendSealedTo(cBeto.token, { move: 'e4' }, { peerPubkey: beto.publickey })
+  const sent = withContent(cAna).at(-1)
+  assert.deepEqual(sent.to, [cBeto.token], 'it no longer goes by token')
+  assert.ok(!JSON.stringify(sent).includes('e4'), 'went out in clear')
 
-  await esperar(400)
-  assert.deepEqual(cBeto.recibidos[0].payload, { jugada: 'e4' })
-  assert.equal(cBeto.recibidos[0].meta.sealed, true)
+  await sleep(400)
+  assert.deepEqual(cBeto.inbox[0].payload, { move: 'e4' })
+  assert.equal(cBeto.inbox[0].meta.sealed, true)
 
   cAna.close(); cBeto.close()
 })
 
-scenario('nadie puede anunciar la llave de otro', async () => {
-  const ana = await identidad('ana')
-  const bruto = await identidad('bruto')
-  const cBruto = await conectar(bruto)
+scenario('nobody can announce someone else\'s key', async () => {
+  const ana = await identity('ana')
+  const brute = await identity('brute')
+  const cBruto = await connect(brute)
 
   // El sobre está bien firmado por ana, pero lo presenta la conexión de bruto.
   await assert.rejects(
     () => cBruto.announceEncPub({ publickey: ana.publickey, encPub: ana.encPub, sign: ana.sign }))
 
   // Y sigue sin haber llave para ana.
-  const cOtro = await conectar(await identidad('otro'))
+  const cOther = await connect(await identity('other'))
   await assert.rejects(
-    () => cOtro.encPubOf(ana.publickey),
+    () => cOther.encPubOf(ana.publickey),
     (e) => e.code === 'no-encpub')
 
-  cBruto.close(); cOtro.close()
+  cBruto.close(); cOther.close()
 })
 
 const ok = await runScenarios()

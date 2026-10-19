@@ -168,7 +168,7 @@ scenario('C · removing `sign` in the record stops signing EVEN THOUGH the 30-da
       masterPubkey: vault.iss, proxyUrl: proxy.url,
       device: res.device, cert: res.cert, payload: { sign: 'anyway' }, dir: tmpDir('sign-c-ko')
     }),
-    /unauthorized|no autorizado|acta/i,
+    /unauthorized|no autorizado|record/i,
     'with the permission removed, the vault does not sign even if the cert is alive'
   )
 })

@@ -30,6 +30,7 @@ npm run smoke:console
 npm run smoke:tui
 npm run smoke:ui
 npm run smoke:sealed-strangers         # dos desconocidos se sellan (llave averiguada, no emparejada)
+npm run smoke:native-app      # la app Dotrino (emulador Android + simulador iOS en la Mac) se enrola y aprueba
 ```
 
 Cada uno arranca lo que necesita y lo apaga al terminar.

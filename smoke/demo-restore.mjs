@@ -57,7 +57,7 @@ const OTHER_ID = path.join(ids, 'other')
 fs.copyFileSync('/etc/machine-id', MACHINE_ID)
 fs.writeFileSync(OTHER_ID, '0123456789abcdef0123456789abcdef\n')
 
-const SNAPSHOT = tmpDir('snapshot')        // la copia guardada: vault/ y maquina/
+const SNAPSHOT = tmpDir('snapshot')        // la copia guardada: vault/ y machine/
 const iframeUrl = () => `${webIframe.url}/?proxy=${encodeURIComponent(proxy.url)}`
 
 const signInAs = (context) => signIn(context, { pageUrl: webSignIn.url, iframeUrl: iframeUrl(), proxyUrl: proxy.url, address, password: PASSWORD })

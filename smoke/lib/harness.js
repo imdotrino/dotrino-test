@@ -193,10 +193,13 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
     /**
      * `dotrino-vault pair` → devuelve el QR. Con `service` es `pair --service <ns>`: el cert
      * sale limitado a `vault:secrets:<ns>` y en el acta entra como SERVICIO con ese CN.
+     * Con `caps` es `pair --scope <permisos>` (nombres del acta: `sign`, `read`…): entran al
+     * acta con ellos, igual que la CLI (`src/ctl.js`, `cmdPair`), y el cajón va en `scope`.
      */
-    async pair ({ service, label } = {}) {
+    async pair ({ service, label, caps } = {}) {
       try { fs.rmSync(path.join(dir, 'pair.json'), { force: true }) } catch (_) {}
-      writeReq('pair-request.json', { ...(label ? { label } : {}), ...(service ? { service } : {}) })
+      const scope = caps?.length && service ? ['vault:secrets:' + service] : null
+      writeReq('pair-request.json', { ...(label ? { label } : {}), ...(service ? { service } : {}), ...(scope ? { scope } : {}), ...(caps?.length ? { caps } : {}) })
       signal('SIGUSR1')
       const t = Date.now() + 8000
       while (Date.now() < t) {

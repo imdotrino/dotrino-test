@@ -43,7 +43,8 @@
     "smoke:short-pairing": "node smoke/short-pairing.mjs",
     "smoke:demo-apple": "node smoke/demo-apple.mjs",
     "smoke:native-app": "node smoke/native-app.mjs",
-    "smoke:native-messenger": "node smoke/native-messenger.mjs"
+    "smoke:native-messenger": "node smoke/native-messenger.mjs",
+    "smoke:expenses-mail": "node smoke/expenses-mail.mjs"
   },
   "devDependencies": {
     "@vitejs/plugin-basic-ssl": "2.3.0",

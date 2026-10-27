@@ -369,7 +369,7 @@ scenario('permissions with C: admin is ASKED first, and stays in the record', as
   await sleep(300)
   tui.keys('c')
   const p = await tui.waitFor(/Permisos de/)
-  // El título de cada permiso es SU NOMBRE en la CLI (`caps <ID> +administra`), y lo que hace
+  // El título de cada permiso es SU NOMBRE en la CLI (`caps <ID> +admin`), y lo que hace
   // va debajo. Antes eran frases («Firmar como tú»…), y esta prueba se quedó con ellas.
   for (const text of [/\bfirma\b/, /\bguarda\b/, /\blee\b/, /\badministra\b/]) {
     assert.match(p, text, 'the four permissions, with the name typed in the CLI')

@@ -341,7 +341,7 @@ scenario('without «administra», the remote console says no', async () => {
 
 scenario('the owner grants «administra» ON THE PC and the permission arrives by renewing the cert', async () => {
   const id = await idOf(admin.pub)
-  const output = ctl(`caps ${id} +administra`)
+  const output = ctl(`caps ${id} +admin`)
   assert.equal(output.status, 0, 'the CLI accepted the change: ' + (output.stderr || output.stdout))
   await sleep(1200)
   assert.match(members(), /administra el perfil/i, 'the record now says it administers:\n' + members())
@@ -541,13 +541,13 @@ scenario('renouncing: the device drops signing and the vault SEALS it in the rec
 
   // Y el Master puede devolvérselo: si conceder no limpiara la renuncia, `effectiveCaps`
   // la restaría para siempre y la promesa de la interfaz sería mentira.
-  ctl(`caps ${id} +firma`)
+  ctl(`caps ${id} +sign`)
   await sleep(1500)
   assert.match(capsOf(id), /firma/, 'the Master gives it back:\n' + members())
 })
 
 scenario('removing «administra» cuts administration AT ONCE', async () => {
-  ctl(`caps ${await idOf(admin.pub)} -administra`)
+  ctl(`caps ${await idOf(admin.pub)} -admin`)
   await sleep(1200)
   // Con el cert TODAVÍA en la mano (no ha caducado): antes seguía administrando hasta un
   // mes, porque solo se miraba el cert. Ahora se cruza con el acta, como los secretos.

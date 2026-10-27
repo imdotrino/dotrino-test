@@ -63,7 +63,7 @@ for (let i = 0; i < 40; i++) {
 }
 say('ME', { nickname: me?.nickname, avatar: !!me?.avatar, email: me?.email ?? null })
 
-// Aprobar con la MISMA llave: espera a que el dueño le dé +aprueba en la bóveda.
+// Aprobar con la MISMA llave: espera a que el dueño le dé +approve en la bóveda.
 for (let i = 0; i < 120; i++) {
   const a = await core.handlers.vaultApprovals({ op: 'approvals' }).catch((e) => ({ error: e.message, code: e.code }))
   if (Array.isArray(a?.items)) { say('APPROVES', { items: a.items.length }); break }

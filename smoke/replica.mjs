@@ -102,7 +102,7 @@ scenario('a service reads it from the VAULT, and so learns the account', async (
     const l = a.split('\n').find((x) => x.includes(`«${NS}»`))
     return l ? (/\b([0-9A-F]{4}-[0-9A-F]{4})\b/.exec(l) || [])[1] : null
   }, { retryErrors: true, what: 'the record to list the service' })
-  B.exec(`caps ${serviceId} +desatendido`)
+  B.exec(`caps ${serviceId} +unattended`)
 
   // `approvalTimeoutMs` corto: un pedido de aprobación bloquea CINCO minutos, y con eso
   // el bucle de reintento no llegaba nunca a probar después de conceder el permiso.

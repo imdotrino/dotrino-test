@@ -12,7 +12,7 @@
  *
  * Tres cajas, tres máquinas:
  *   · `vault-a` — la bóveda que tiene la cuenta. Binario real + su CLI.
- *   · `vault-b` — la otra bóveda. Entra con `join` y recibe `+sella`.
+ *   · `vault-b` — la otra bóveda. Entra con `join` y recibe `+sealer`.
  *   · `device`   — un teléfono cualquiera, que entra por B para demostrar que B manda.
  *
  *   node smoke/two-vaults.mjs            (Docker si lo hay; si no, cajas locales)
@@ -151,13 +151,13 @@ scenario('B is NOT born able to seal: it is a permission granted by hand', async
 })
 
 scenario('the owner GRANTS the seal permission, and can REVOKE it', async () => {
-  A.ctl(`caps ${idB} +sella`)
+  A.ctl(`caps ${idB} +sealer`)
   await waitFor(() => /sella|sealer/i.test(capsOf(idB)), { what: 'the record to grant it sealing' })
 
-  A.ctl(`caps ${idB} -sella`)
+  A.ctl(`caps ${idB} -sealer`)
   await waitFor(() => !/sella|sealer/i.test(capsOf(idB)), { what: 'the permission to be removed' })
 
-  A.ctl(`caps ${idB} +sella`)
+  A.ctl(`caps ${idB} +sealer`)
   await waitFor(() => /sella|sealer/i.test(capsOf(idB)), { what: 'the permission to be granted again' })
 })
 

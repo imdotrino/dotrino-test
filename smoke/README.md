@@ -166,14 +166,14 @@ aparato **nuevo**. Escenarios:
 
 1. El admin entra como un aparato normal — y el QR **nunca** otorga administración.
 2. Sin «administra», la consola remota le dice que no.
-3. El dueño concede `+administra` en el PC, y el permiso **llega al cert al renovar**.
+3. El dueño concede `+admin` en el PC, y el permiso **llega al cert al renovar**.
 4. **El paso clave:** el admin abre un emparejamiento, el aparato nuevo muestra su código y
    el admin lo aprueba **desde su máquina**. La bitácora anota **quién** aprobó.
 5. Un admin **no** puede crear otro admin ni emparejar servicios (se corta en la bóveda).
 6. El aviso firmado llega a los demás aparatos: administrar a distancia no es invisible.
 7. **F4** — datos sensibles guardados y recuperados por el camino real, y sin quedar en
    claro en el disco de la bóveda.
-8. Quitar `-administra` corta la administración **en el acto**, sin esperar a la caducidad.
+8. Quitar `-admin` corta la administración **en el acto**, sin esperar a la caducidad.
 
 Requiere el binario (`cd ../dotrino-vault && bash packaging/build.sh`).
 

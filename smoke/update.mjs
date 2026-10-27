@@ -142,7 +142,7 @@ scenario('WITH THE SETTING ON and an approver that is a BROWSER: it asks, the br
   // Por su HUELLA, que sale de su llave: la etiqueta la pone `pair` y no dice quién es.
   const id = await keyLabel(pub)
   assert.match(m.ctl('members'), new RegExp(id), 'the browser shows up among the members')
-  m.ctl(`caps ${id} +aprueba`)
+  m.ctl(`caps ${id} +approve`)
   log('[approver] ' + id + ' ' + pub.slice(0, 40))
   // Pedir permiso es un ajuste, apagado por defecto: sin encenderlo se actualizaría sola.
   assert.match(m.ctl('update --approval on'), /pide aprobaci[oó]n/, 'the setting is on')

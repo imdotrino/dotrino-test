@@ -10,7 +10,7 @@
  *   2. el «teléfono» —núcleo del iframe con las llaves en un chip simulado, `cajas/telefono-
  *      chip.mjs`— se empareja: no guarda ninguna privada, BAJA ese perfil y le pasa la cuenta
  *      a la app (`save`, lo que usa la pantalla nativa de Pedidos);
- *   3. en la bóveda es UN aparato nuevo, y con `+aprueba` esa misma llave aprueba.
+ *   3. en la bóveda es UN aparato nuevo, y con `+approve` esa misma llave aprueba.
  *
  *   npm run smoke:chip-key [-- --verbose]
  */
@@ -103,13 +103,13 @@ scenario('the phone DOWNLOADS the account profile (what used to come out empty)'
   assert.equal(tel.ME.email, 'santi@example.com', 'a field: ' + JSON.stringify(tel.ME))
 })
 
-scenario('in the vault it is ONE device, and with +aprueba the same key approves', async () => {
+scenario('in the vault it is ONE device, and with +approve the same key approves', async () => {
   // Unirse a la cuenta crea un perfil NUEVO en el teléfono, con su propia llave del chip.
   const id = tel.PAIRED.deviceId
   assert.equal(await keyLabel(tel.PAIRED.pub), id, 'the vault device IS the chip key')
   const members = ctl('members')
   assert.equal(members.split('\n').filter((l) => l.includes(id)).length, 1, `the phone (${id}) is a single member:\n` + members)
-  ctl(`caps ${id} +aprueba`)
+  ctl(`caps ${id} +approve`)
   await waitFor(() => tel.APPROVES, { timeoutMs: 60000, what: 'the phone to be able to list the requests' })
   assert.ok(Number.isInteger(tel.APPROVES.items))
 })

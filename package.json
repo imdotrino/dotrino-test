@@ -23,6 +23,7 @@
     "smoke:at-rest": "node smoke/at-rest.mjs",
     "smoke:replica": "node smoke/replica.mjs",
     "smoke:direct": "node smoke/direct.mjs",
+    "smoke:content-key": "node smoke/content-key.mjs",
     "smoke:remote-unlock": "node smoke/remote-unlock.mjs",
     "smoke:sealed-strangers": "node smoke/sealed-strangers.mjs",
     "smoke:new-profile": "node smoke/new-profile.mjs",

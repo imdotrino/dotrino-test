@@ -53,13 +53,30 @@ const messages = {
 // El idioma lo lleva <dotrino-topbar> (§5): él tiene el toggle, lo persiste en
 // «dotrino.lang» y pone document.documentElement.lang. Aquí solo se lee y se
 // escucha su evento para traducir la copy de la página.
+/** @type {'es'|'en'} */
 let lang = (() => {
   let saved
   try { saved = localStorage.getItem('dotrino.lang') } catch (_) {}
   if (saved === 'es' || saved === 'en') return saved
   return (navigator.language || 'es').toLowerCase().startsWith('en') ? 'en' : 'es'
 })()
-const t = (k) => (messages[lang] || messages.es)[k] ?? k
+/**
+ * @param {string} k
+ * @returns {string}
+ */
+const t = (k) => /** @type {Record<string, string>} */ (messages[lang] || messages.es)[k] ?? k
+
+/**
+ * El elemento con ese id. Tiene que existir: si falta, index.html está mal.
+ *
+ * @param {string} id
+ * @returns {HTMLElement}
+ */
+const $ = (id) => {
+  const el = document.getElementById(id)
+  if (!el) throw new Error(`missing element #${id}`)
+  return el
+}
 
 function applyI18n () {
   document.querySelectorAll('[data-i18n]').forEach((el) => { el.innerHTML = t(el.dataset.i18n) })
@@ -72,7 +89,7 @@ function refreshMode () {
   const active = modes.find((m) => matchMedia(`(display-mode: ${m})`).matches) || 'browser'
   const iosStandalone = /** @type {Navigator & { standalone?: boolean }} */ (window.navigator).standalone === true
   const inPwa = active !== 'browser' || iosStandalone
-  document.getElementById('mode').innerHTML =
+  $('mode').innerHTML =
     `<span class="dot ${inPwa ? 'on' : 'off'}"></span>display-mode: <b>${active}</b>${iosStandalone ? ' (iOS standalone)' : ''}`
   return inPwa
 }
@@ -88,9 +105,11 @@ function intentUrl ({ pkg } = {}) {
   return `intent://${host}#Intent;${parts.join(';')};end`
 }
 
-const logEl = document.getElementById('log')
+const logEl = $('log')
+/** @param {string} msg */
 function log (msg) { logEl.textContent = `[${new Date().toLocaleTimeString()}] ${msg}\n` + logEl.textContent }
 
+/** @type {Record<string, () => void>} */
 const methods = {
   'open-noopener' () { const w = window.open(TARGET, '_blank', 'noopener'); log(t('logA') + (w ? t('win') : t('null'))) },
   'open-blank' () { const w = window.open(TARGET, '_blank'); log(t('logB') + (w ? t('win') : t('null'))) },
@@ -104,14 +123,14 @@ const methods = {
   'intent-chrome' () { const url = intentUrl({ pkg: 'com.android.chrome' }); log(t('navTo') + url); window.location.href = url },
 }
 
-document.getElementById('methods').addEventListener('click', (e) => {
-  const btn = e.target.closest('[data-method]')
+$('methods').addEventListener('click', (e) => {
+  const btn = /** @type {HTMLElement | null} */ (/** @type {Element} */ (e.target).closest('[data-method]'))
   if (!btn) return
-  const fn = methods[btn.dataset.method]
-  if (fn) { try { fn() } catch (err) { log(t('err') + err.message) } }
+  const fn = methods[/** @type {string} */ (btn.dataset.method)]
+  if (fn) { try { fn() } catch (err) { log(t('err') + /** @type {{ message?: string }} */ (err).message) } }
 })
-document.getElementById('real-link').addEventListener('click', () => log(t('logD')))
-document.getElementById('clear').addEventListener('click', () => { logEl.textContent = '' })
+$('real-link').addEventListener('click', () => log(t('logD')))
+$('clear').addEventListener('click', () => { logEl.textContent = '' })
 const topbar = document.querySelector('dotrino-topbar')
 topbar?.addEventListener('dotrino-lang', (e) => {
   lang = e.detail?.lang === 'en' ? 'en' : 'es'
@@ -127,7 +146,7 @@ topbar?.addEventListener('dotrino-lang', (e) => {
     topbar.identity = id
     topbar.reputation = createVaultReputation(id)
   } catch (e) {
-    console.warn('[identity] vault unreachable:', e && e.message)
+    console.warn('[identity] vault unreachable:', e && /** @type {{ message?: string }} */ (e).message)
   }
 })()
 

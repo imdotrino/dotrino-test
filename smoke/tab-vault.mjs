@@ -9,7 +9,7 @@
  *
  * Lo que se mira, por el mismo camino que usa la consola de `vault.dotrino.com`:
  *   · «este dispositivo es bóveda» arranca el núcleo;
- *   · la consola la administra por el camino local (cajones, bloquear, lista de aparatos);
+ *   · la consola la administra por el camino local (cajones, bloquear, concesiones, lista de aparatos);
  *   · abre invitaciones;
  *   · lo escrito sobrevive a recargar la página (IndexedDB).
  *
@@ -56,6 +56,12 @@ window.rpc = (method, params = {}) => new Promise((res, rej) => { const id = ++n
     const fake = JSON.stringify({ kty: 'EC', crv: 'P-256', x: 'AAAA', y: 'BBBB' })
     const b = await rpc('vaultAdmin', { op: 'block', sub: fake })
     assert.ok(!b.e, 'could not block: ' + b.e)
+    // LAS CONCESIONES, como en la TUI: la consola de esta bóveda las ve y las corta con
+    // `admin`, sin ser aprobadora (vault ≥ 0.119.0).
+    const g = await rpc('vaultAdmin', { op: 'grants' })
+    assert.ok(Array.isArray(g.r?.items), 'the grants do not arrive over the local path: ' + (g.e || JSON.stringify(g.r)))
+    const gr = await rpc('vaultAdmin', { op: 'grant-revoke', id: 'no-such-grant' })
+    assert.equal(gr.r?.ok, false, 'revoking an unknown grant should say no: ' + (gr.e || JSON.stringify(gr.r)))
     const list = await rpc('listVaultDevices')
     assert.ok(Array.isArray(list.r?.devices), 'the device list does not come from the vault: ' + list.e)
     const inv = await rpc('selfVaultPairing', { label: 'smoke' })

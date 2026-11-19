@@ -205,6 +205,7 @@ export async function startVault ({ proxyUrl, name = 'vault', log = () => {}, di
       while (Date.now() < t) {
         const p = readJson(path.join(dir, 'pair.json'))
         if (p?.qr) return p.qr
+        if (p?.error) throw Object.assign(new Error('the vault refused the pairing: ' + p.error), { code: p.code })
         await sleep(120)
       }
       throw new Error('the vault did not publish the pairing')

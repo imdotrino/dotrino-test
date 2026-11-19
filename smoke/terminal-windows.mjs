@@ -65,7 +65,9 @@ const waitLong = (fn, o) => waitFor(fn, { timeoutMs: 60000, every: 1000, ...o })
 async function link (name) {
   const { enroll } = await import(path.join(AGENT, 'link.js'))
   const dir = tmpDir('win-' + name)
-  const qr = await vault.pair({ label: name })
+  // Abrir una consola en otra máquina pide `terminal` en el acta (remote-agent ≥ 0.23.0), y el
+  // certificado necesita algún permiso que pueda llevar: los de siempre más `terminal`.
+  const qr = await vault.pair({ label: name, caps: ['sign', 'read', 'store', 'terminal'] })
   await enroll({ qr, dir, onChallenge: ({ code }) => { vault.waitPending().then(() => vault.approve(code)) } })
   return dir
 }
@@ -106,9 +108,13 @@ scenario('the profile gets linked and another machine (the host) starts', async 
   const dirA = await link('windows-vm')
   const dirB = await link('desktop')
   // Desde la VM el host es la puerta de la red de libvirt: el enlace apunta ahí.
-  const link = JSON.parse(fs.readFileSync(path.join(dirA, 'link.json'), 'utf8'))
-  link.proxy = `ws://${HOST}:${proxy.port}`
-  fs.writeFileSync(path.join(dirA, 'link.json'), JSON.stringify(link, null, 2))
+  // El enlace va cifrado con la llave de ESTA máquina: se copia en claro (el agente lo lee y lo
+  // vuelve a cifrar con la de la VM) y sin la sal del cifrado del host.
+  const { loadLink } = await import(path.join(AGENT, 'link.js'))
+  const linkA = loadLink(dirA)
+  linkA.proxy = `ws://${HOST}:${proxy.port}`
+  fs.writeFileSync(path.join(dirA, 'link.json'), JSON.stringify(linkA, null, 2))
+  for (const f of ['atrest.salt', 'atrest.machine']) fs.rmSync(path.join(dirA, f), { force: true })
   mustPass(ps(`New-Item -ItemType Directory -Force '${dirVM()}' | Out-Null`), 'the profile folder')
   const dest = `${dirVM().replace(/\\/g, '/')}/`
   for (const f of fs.readdirSync(dirA).filter((x) => fs.statSync(path.join(dirA, x)).isFile())) {
